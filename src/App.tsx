@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { getCurrent } from '@tauri-apps/api/window'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import VideoProcessor from './components/VideoProcessor'
 import { tauriAPI } from './lib/tauri-api'
 import { useVideoStore } from './store/useVideoStore'
@@ -25,7 +25,7 @@ function App() {
   // Set up window close handler
   useEffect(() => {
     const setupCloseHandler = async () => {
-      const appWindow = getCurrent()
+      const appWindow = getCurrentWindow()
 
       const unlisten = await appWindow.onCloseRequested(async (event) => {
         if (isProcessing && currentJobId) {
