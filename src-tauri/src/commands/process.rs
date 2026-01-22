@@ -2,7 +2,7 @@ use crate::state::{AppState, ProcessJob};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use uuid::Uuid;
