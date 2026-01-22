@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useVideoStore } from '../store/useVideoStore'
+import { tauriAPI } from '../lib/tauri-api'
 
 const ProcessingPanel: React.FC = () => {
   const {
@@ -10,33 +11,72 @@ const ProcessingPanel: React.FC = () => {
     processingProgress,
     setProcessing,
     setProcessingProgress,
-    setError
+    setError,
+    currentJobId,
+    setCurrentJobId,
   } = useVideoStore()
 
   const [outputPath, setOutputPath] = useState('')
 
   useEffect(() => {
-    const handleProgress = (time: number) => {
-      if (videoFile && trimSettings) {
-        const duration = trimSettings.endTime - trimSettings.startTime
-        const percentage = Math.min(100, (time / duration) * 100)
-        setProcessingProgress({ currentTime: time, percentage })
-      }
+    let unlistenProgress: (() => void) | null = null
+    let unlistenComplete: (() => void) | null = null
+    let unlistenError: (() => void) | null = null
+    let unlistenCancelled: (() => void) | null = null
+
+    const setupListeners = async () => {
+      unlistenProgress = await tauriAPI.onFFmpegProgress((event) => {
+        if (event.jobId === currentJobId) {
+          setProcessingProgress({
+            currentTime: event.seconds,
+            percentage: event.percent,
+          })
+        }
+      })
+
+      unlistenComplete = await tauriAPI.onFFmpegComplete((jobId) => {
+        if (jobId === currentJobId) {
+          setProcessingProgress({ currentTime: trimSettings.endTime - trimSettings.startTime, percentage: 100 })
+          setTimeout(() => {
+            setProcessing(false)
+            setProcessingProgress(null)
+            setCurrentJobId(null)
+          }, 1000)
+        }
+      })
+
+      unlistenError = await tauriAPI.onFFmpegError((jobId, error) => {
+        if (jobId === currentJobId) {
+          setError(`Processing failed: ${error}`)
+          setProcessing(false)
+          setProcessingProgress(null)
+          setCurrentJobId(null)
+        }
+      })
+
+      unlistenCancelled = await tauriAPI.onFFmpegCancelled((jobId) => {
+        if (jobId === currentJobId) {
+          setError('Processing cancelled')
+          setProcessing(false)
+          setProcessingProgress(null)
+          setCurrentJobId(null)
+        }
+      })
     }
 
-    if (window.electronAPI?.onFFmpegProgress) {
-      window.electronAPI.onFFmpegProgress(handleProgress)
+    setupListeners()
+
+    return () => {
+      if (unlistenProgress) unlistenProgress()
+      if (unlistenComplete) unlistenComplete()
+      if (unlistenError) unlistenError()
+      if (unlistenCancelled) unlistenCancelled()
     }
-  }, [videoFile, trimSettings, setProcessingProgress])
+  }, [currentJobId, setProcessingProgress, setProcessing, setError, setCurrentJobId, trimSettings.endTime, trimSettings.startTime])
 
   const handleSelectOutput = async () => {
-    if (!window.electronAPI?.selectOutputFile) {
-      setError('Electron API not available - please run in Electron app')
-      return
-    }
-    
     try {
-      const filePath = await window.electronAPI.selectOutputFile()
+      const filePath = await tauriAPI.selectOutputFile()
       if (filePath) {
         setOutputPath(filePath)
       }
@@ -51,36 +91,34 @@ const ProcessingPanel: React.FC = () => {
       return
     }
 
-    if (!window.electronAPI?.processVideo) {
-      setError('Electron API not available - please run in Electron app')
-      return
-    }
-
     try {
       setProcessing(true)
       setProcessingProgress({ currentTime: 0, percentage: 0 })
       setError(null)
 
-      const options = {
+      const jobId = await tauriAPI.processVideo({
         inputFile: videoFile.path,
         outputFile: outputPath,
         startTime: trimSettings.startTime,
         endTime: trimSettings.endTime,
-        subtitleFile: subtitleFile?.path
-      }
+        subtitleFile: subtitleFile?.path,
+      })
 
-      await window.electronAPI.processVideo(options)
-      
-      setProcessingProgress({ currentTime: trimSettings.endTime - trimSettings.startTime, percentage: 100 })
-      setTimeout(() => {
-        setProcessing(false)
-        setProcessingProgress(null)
-      }, 1000)
-      
+      setCurrentJobId(jobId)
     } catch (error) {
-      setError(`Processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      setError(`Failed to start processing: ${error instanceof Error ? error.message : 'Unknown error'}`)
       setProcessing(false)
       setProcessingProgress(null)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (currentJobId) {
+      try {
+        await tauriAPI.cancelProcess(currentJobId)
+      } catch (error) {
+        setError(`Failed to cancel processing: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      }
     }
   }
 
@@ -89,7 +127,7 @@ const ProcessingPanel: React.FC = () => {
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <h2 className="text-xl font-semibold mb-4">Export Settings</h2>
-      
+
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -102,7 +140,8 @@ const ProcessingPanel: React.FC = () => {
               </span>
               <button
                 onClick={handleSelectOutput}
-                className="ml-2 text-primary-500 hover:text-primary-600 text-sm font-medium"
+                disabled={isProcessing}
+                className="ml-2 text-primary-500 hover:text-primary-600 text-sm font-medium disabled:opacity-50"
               >
                 Change
               </button>
@@ -110,7 +149,8 @@ const ProcessingPanel: React.FC = () => {
           ) : (
             <button
               onClick={handleSelectOutput}
-              className="w-full p-3 border-2 border-dashed border-gray-300 rounded-md text-gray-500 hover:border-gray-400 hover:text-gray-600"
+              disabled={isProcessing}
+              className="w-full p-3 border-2 border-dashed border-gray-300 rounded-md text-gray-500 hover:border-gray-400 hover:text-gray-600 disabled:opacity-50"
             >
               Select output location
             </button>
@@ -146,17 +186,26 @@ const ProcessingPanel: React.FC = () => {
           </div>
         )}
 
-        <button
-          onClick={handleProcess}
-          disabled={!canProcess}
-          className={`w-full py-3 px-4 rounded-md font-medium transition-colors ${
-            canProcess
-              ? 'bg-primary-500 hover:bg-primary-600 text-white'
-              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-          }`}
-        >
-          {isProcessing ? 'Processing...' : 'Start Processing'}
-        </button>
+        {!isProcessing ? (
+          <button
+            onClick={handleProcess}
+            disabled={!canProcess}
+            className={`w-full py-3 px-4 rounded-md font-medium transition-colors ${
+              canProcess
+                ? 'bg-primary-500 hover:bg-primary-600 text-white'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            Start Processing
+          </button>
+        ) : (
+          <button
+            onClick={handleCancel}
+            className="w-full py-3 px-4 rounded-md font-medium bg-red-500 hover:bg-red-600 text-white"
+          >
+            Cancel Processing
+          </button>
+        )}
       </div>
     </div>
   )

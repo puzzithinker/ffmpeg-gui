@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useVideoStore } from '../store/useVideoStore'
+import { tauriAPI } from '../lib/tauri-api'
 
 const VideoPreview: React.FC = () => {
   const { videoFile } = useVideoStore()
@@ -7,9 +8,9 @@ const VideoPreview: React.FC = () => {
 
   useEffect(() => {
     const getVideoUrl = async () => {
-      if (videoFile && window.electronAPI?.getVideoUrl) {
+      if (videoFile) {
         try {
-          const url = await window.electronAPI.getVideoUrl(videoFile.path)
+          const url = await tauriAPI.getVideoUrl(videoFile.path)
           setVideoUrl(url)
         } catch (error) {
           console.error('Failed to get video URL:', error)

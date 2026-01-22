@@ -8,6 +8,7 @@ interface VideoStore {
   isProcessing: boolean
   processingProgress: ProcessingProgress | null
   error: string | null
+  currentJobId: string | null
 
   setVideoFile: (file: VideoFile | null) => void
   setSubtitleFile: (file: SubtitleFile | null) => void
@@ -15,6 +16,7 @@ interface VideoStore {
   setProcessing: (isProcessing: boolean) => void
   setProcessingProgress: (progress: ProcessingProgress | null) => void
   setError: (error: string | null) => void
+  setCurrentJobId: (jobId: string | null) => void
   reset: () => void
 }
 
@@ -25,6 +27,7 @@ export const useVideoStore = create<VideoStore>((set) => ({
   isProcessing: false,
   processingProgress: null,
   error: null,
+  currentJobId: null,
 
   setVideoFile: (file) => set({ videoFile: file }),
   setSubtitleFile: (file) => set({ subtitleFile: file }),
@@ -35,6 +38,7 @@ export const useVideoStore = create<VideoStore>((set) => ({
   setProcessing: (isProcessing) => set({ isProcessing }),
   setProcessingProgress: (progress) => set({ processingProgress: progress }),
   setError: (error) => set({ error }),
+  setCurrentJobId: (jobId) => set({ currentJobId: jobId }),
   reset: () =>
     set({
       videoFile: null,
@@ -42,6 +46,7 @@ export const useVideoStore = create<VideoStore>((set) => ({
       trimSettings: { startTime: 0, endTime: 0 },
       isProcessing: false,
       processingProgress: null,
-      error: null
+      error: null,
+      currentJobId: null,
     })
 }))

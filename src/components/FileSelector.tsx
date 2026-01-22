@@ -1,27 +1,23 @@
 import React from 'react'
 import { useVideoStore } from '../store/useVideoStore'
+import { tauriAPI } from '../lib/tauri-api'
 
 const FileSelector: React.FC = () => {
   const { videoFile, subtitleFile, setVideoFile, setSubtitleFile, setError, setTrimSettings } = useVideoStore()
 
   const handleVideoSelect = async () => {
-    if (!window.electronAPI?.selectVideoFile || !window.electronAPI?.getVideoDuration) {
-      setError('Electron API not available - please run in Electron app')
-      return
-    }
-
     try {
-      const filePath = await window.electronAPI.selectVideoFile()
+      const filePath = await tauriAPI.selectVideoFile()
       if (filePath) {
-        const duration = await window.electronAPI.getVideoDuration(filePath)
+        const duration = await tauriAPI.getVideoDuration(filePath)
         const fileName = filePath.split(/[/\\]/).pop() || 'Unknown'
-        
+
         setVideoFile({
           path: filePath,
           name: fileName,
           duration
         })
-        
+
         setTrimSettings({ startTime: 0, endTime: duration })
         setError(null)
       }
@@ -31,13 +27,8 @@ const FileSelector: React.FC = () => {
   }
 
   const handleSubtitleSelect = async () => {
-    if (!window.electronAPI?.selectSubtitleFile) {
-      setError('Electron API not available - please run in Electron app')
-      return
-    }
-
     try {
-      const filePath = await window.electronAPI.selectSubtitleFile()
+      const filePath = await tauriAPI.selectSubtitleFile()
       if (filePath) {
         const fileName = filePath.split(/[/\\]/).pop() || 'Unknown'
         setSubtitleFile({

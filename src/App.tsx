@@ -1,8 +1,147 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
+import { getCurrent } from '@tauri-apps/api/window'
 import VideoProcessor from './components/VideoProcessor'
+import { tauriAPI } from './lib/tauri-api'
+import { useVideoStore } from './store/useVideoStore'
 
 function App() {
-  const isElectron = !!window.electronAPI
+  const [ffmpegAvailable, setFfmpegAvailable] = useState<boolean | null>(null)
+  const { isProcessing, currentJobId, setCurrentJobId, setProcessing, setProcessingProgress } = useVideoStore()
+
+  // Check FFmpeg availability on startup
+  useEffect(() => {
+    const checkFFmpeg = async () => {
+      try {
+        const available = await tauriAPI.checkFfmpegAvailability()
+        setFfmpegAvailable(available)
+      } catch (error) {
+        setFfmpegAvailable(false)
+      }
+    }
+
+    checkFFmpeg()
+  }, [])
+
+  // Set up window close handler
+  useEffect(() => {
+    const setupCloseHandler = async () => {
+      const appWindow = getCurrent()
+
+      const unlisten = await appWindow.onCloseRequested(async (event) => {
+        if (isProcessing && currentJobId) {
+          event.preventDefault()
+
+          // Show confirmation dialog
+          const shouldClose = window.confirm(
+            'Processing in progress. Cancel and close?'
+          )
+
+          if (shouldClose) {
+            // Cancel the job
+            try {
+              await tauriAPI.cancelProcess(currentJobId)
+              setCurrentJobId(null)
+              setProcessing(false)
+              setProcessingProgress(null)
+            } catch (error) {
+              console.error('Failed to cancel process:', error)
+            }
+            // Close the window
+            await appWindow.close()
+          }
+        }
+      })
+
+      return unlisten
+    }
+
+    setupCloseHandler().then((unlisten) => {
+      return () => {
+        unlisten?.()
+      }
+    })
+  }, [isProcessing, currentJobId, setCurrentJobId, setProcessing, setProcessingProgress])
+
+  // Blocking modal if FFmpeg is not available
+  if (ffmpegAvailable === false) {
+    return (
+      <div className="min-h-screen bg-gray-900 bg-opacity-75 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+          <div className="text-center">
+            <svg
+              className="mx-auto h-12 w-12 text-red-500 mb-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">
+              FFmpeg Not Found
+            </h2>
+            <p className="text-gray-600 mb-6">
+              This application requires FFmpeg and FFprobe to be installed and
+              accessible from your system PATH.
+            </p>
+            <div className="bg-gray-50 rounded-md p-4 mb-6 text-left">
+              <p className="text-sm font-medium text-gray-900 mb-2">
+                Installation Instructions:
+              </p>
+              <ul className="text-sm text-gray-600 space-y-1 list-disc list-inside">
+                <li>
+                  <strong>Windows:</strong> Download from{' '}
+                  <a
+                    href="https://ffmpeg.org/download.html"
+                    className="text-primary-500 hover:underline"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    ffmpeg.org
+                  </a>{' '}
+                  and add to PATH
+                </li>
+                <li>
+                  <strong>macOS:</strong> Run{' '}
+                  <code className="bg-gray-200 px-1 rounded">
+                    brew install ffmpeg
+                  </code>
+                </li>
+                <li>
+                  <strong>Linux:</strong> Run{' '}
+                  <code className="bg-gray-200 px-1 rounded">
+                    sudo apt install ffmpeg
+                  </code>
+                </li>
+              </ul>
+            </div>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full bg-primary-500 hover:bg-primary-600 text-white font-medium py-2 px-4 rounded-md"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Loading state
+  if (ffmpegAvailable === null) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Checking system requirements...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -14,13 +153,6 @@ function App() {
           <p className="text-gray-600 text-center mt-2">
             Trim videos and burn subtitles with ease
           </p>
-          {!isElectron && (
-            <div className="mt-4 mx-auto max-w-md bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded">
-              <p className="text-sm text-center">
-                ⚠️ Preview mode - Run <code className="bg-yellow-200 px-1 rounded">npm run dev</code> to use full functionality
-              </p>
-            </div>
-          )}
         </header>
         <VideoProcessor />
       </div>
