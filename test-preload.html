@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Preload Test</title>
+</head>
+<body>
+    <h1>Testing Preload Script</h1>
+    <div id="result"></div>
+    
+    <script>
+        console.log('Test page loading...')
+        console.log('window.electronAPI:', typeof window.electronAPI)
+        console.log('electronAPI object:', window.electronAPI)
+        
+        document.getElementById('result').innerHTML = 
+            'electronAPI available: ' + (typeof window.electronAPI !== 'undefined') + '<br>' +
+            'electronAPI type: ' + typeof window.electronAPI
+    </script>
+</body>
+</html>
