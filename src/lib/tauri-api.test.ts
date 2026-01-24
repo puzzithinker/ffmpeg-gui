@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { tauriAPI } from './tauri-api';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(),
@@ -87,5 +88,31 @@ describe('tauriAPI dialog helpers', () => {
     const result = await tauriAPI.selectOutputFile();
 
     expect(result).toBe('C:\\\\output.mp4');
+  });
+
+  it('normalizes snake_case progress events to camelCase payload', async () => {
+    const unlisten = vi.fn();
+    vi.mocked(listen).mockResolvedValue(unlisten);
+    const callback = vi.fn();
+
+    await tauriAPI.onFFmpegProgress(callback);
+
+    const handler = vi.mocked(listen).mock.calls[0][1] as (event: any) => void;
+    handler({ payload: { job_id: 'abc', seconds: 5, percent: 10 } });
+
+    expect(callback).toHaveBeenCalledWith({ jobId: 'abc', seconds: 5, percent: 10 });
+  });
+
+  it('normalizes snake_case completion to camelCase jobId', async () => {
+    const unlisten = vi.fn();
+    vi.mocked(listen).mockResolvedValue(unlisten);
+    const callback = vi.fn();
+
+    await tauriAPI.onFFmpegComplete(callback);
+
+    const handler = vi.mocked(listen).mock.calls[0][1] as (event: any) => void;
+    handler({ payload: { job_id: 'job-123' } });
+
+    expect(callback).toHaveBeenCalledWith('job-123');
   });
 });

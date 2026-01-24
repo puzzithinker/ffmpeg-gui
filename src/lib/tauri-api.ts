@@ -26,6 +26,10 @@ export interface ErrorEvent {
   error: string;
 }
 
+const normalizeJobId = (payload: any): string | undefined => {
+  return payload?.jobId ?? payload?.job_id ?? payload?.jobID;
+};
+
 const normalizeDialogSelection = (selected: string | string[] | null): string | null => {
   if (!selected) return null;
   return Array.isArray(selected) ? selected[0] : selected;
@@ -108,25 +112,33 @@ export const tauriAPI = {
   // Event listeners
   onFFmpegProgress: (callback: (event: ProgressEvent) => void) => {
     return listen<ProgressEvent>('ffmpeg-progress', (event) => {
-      callback(event.payload);
+      const payload: any = event.payload;
+      callback({
+        jobId: normalizeJobId(payload) ?? '',
+        seconds: payload.seconds,
+        percent: payload.percent,
+      });
     });
   },
 
   onFFmpegComplete: (callback: (jobId: string) => void) => {
     return listen<CompleteEvent>('ffmpeg-complete', (event) => {
-      callback(event.payload.jobId);
+      const payload: any = event.payload;
+      callback(normalizeJobId(payload) ?? '');
     });
   },
 
   onFFmpegError: (callback: (jobId: string, error: string) => void) => {
     return listen<ErrorEvent>('ffmpeg-error', (event) => {
-      callback(event.payload.jobId, event.payload.error);
+      const payload: any = event.payload;
+      callback(normalizeJobId(payload) ?? '', payload.error);
     });
   },
 
   onFFmpegCancelled: (callback: (jobId: string) => void) => {
     return listen<CompleteEvent>('ffmpeg-cancelled', (event) => {
-      callback(event.payload.jobId);
+      const payload: any = event.payload;
+      callback(normalizeJobId(payload) ?? '');
     });
   },
 };
