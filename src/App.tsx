@@ -4,6 +4,7 @@ import VideoProcessor from './components/VideoProcessor'
 import LogFileInfo from './components/LogFileInfo'
 import { tauriAPI } from './lib/tauri-api'
 import { useVideoStore } from './store/useVideoStore'
+import { logger } from './lib/logger'
 
 function App() {
   const [ffmpegAvailable, setFfmpegAvailable] = useState<boolean | null>(null)
@@ -32,16 +33,20 @@ function App() {
       const appWindow = getCurrentWindow()
 
       unlisten = await appWindow.onCloseRequested(async (event) => {
+        await logger.log('[App] Close requested')
+
         if (hasConfirmedClose) {
           return
         }
 
         if (isProcessing && currentJobId) {
           event.preventDefault()
+          await logger.log(`[App] Close blocked, processing job=${currentJobId}`)
 
           const shouldClose = window.confirm('Processing in progress. Cancel and close?')
 
           if (!shouldClose) {
+            await logger.log('[App] Close cancelled by user')
             return
           }
 
@@ -52,13 +57,16 @@ function App() {
             setCurrentJobId(null)
             setProcessing(false)
             setProcessingProgress(null)
+            await logger.log(`[App] Processing cancelled during close for job=${currentJobId}`)
           } catch (error) {
             console.error('Failed to cancel process:', error)
+            await logger.error('[App] Failed to cancel during close', error)
           }
 
           await appWindow.close()
         } else {
           hasConfirmedClose = true
+          await logger.log('[App] Closing window (no active job)')
           await appWindow.close()
         }
         // If not processing, allow default close behavior
