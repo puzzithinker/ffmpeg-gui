@@ -9,7 +9,7 @@ pub async fn select_video_file(app: AppHandle) -> Result<Option<String>, String>
         .add_filter("All Files", &["*"])
         .blocking_pick_file();
 
-    Ok(file_path.map(|p| p.path.to_string_lossy().to_string()))
+    Ok(file_path.and_then(|p| p.as_path().map(|path| path.to_string_lossy().to_string())))
 }
 
 #[tauri::command]
@@ -20,7 +20,7 @@ pub async fn select_subtitle_file(app: AppHandle) -> Result<Option<String>, Stri
         .add_filter("All Files", &["*"])
         .blocking_pick_file();
 
-    Ok(file_path.map(|p| p.path.to_string_lossy().to_string()))
+    Ok(file_path.and_then(|p| p.as_path().map(|path| path.to_string_lossy().to_string())))
 }
 
 #[tauri::command]
@@ -31,5 +31,5 @@ pub async fn select_output_file(app: AppHandle) -> Result<Option<String>, String
         .add_filter("All Files", &["*"])
         .blocking_save_file();
 
-    Ok(file_path.map(|p| p.path.to_string_lossy().to_string()))
+    Ok(file_path.and_then(|p| p.as_path().map(|path| path.to_string_lossy().to_string())))
 }
