@@ -26,6 +26,11 @@ export interface ErrorEvent {
   error: string;
 }
 
+const normalizeDialogSelection = (selected: string | string[] | null): string | null => {
+  if (!selected) return null;
+  return Array.isArray(selected) ? selected[0] : selected;
+};
+
 export const tauriAPI = {
   // Dialog operations
   selectVideoFile: async (): Promise<string | null> => {
@@ -38,7 +43,7 @@ export const tauriAPI = {
         },
       ],
     });
-    return selected?.path || null;
+    return normalizeDialogSelection(selected);
   },
 
   selectSubtitleFile: async (): Promise<string | null> => {
@@ -51,7 +56,7 @@ export const tauriAPI = {
         },
       ],
     });
-    return selected?.path || null;
+    return normalizeDialogSelection(selected);
   },
 
   selectOutputFile: async (): Promise<string | null> => {
@@ -63,7 +68,7 @@ export const tauriAPI = {
         },
       ],
     });
-    return selected?.path || null;
+    return normalizeDialogSelection(selected);
   },
 
   // Video operations

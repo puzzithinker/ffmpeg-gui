@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom';
+import { beforeEach, vi } from 'vitest';
 import { setupTauriMocks } from './mocks/tauriMocks';
 
 // Setup default mocks

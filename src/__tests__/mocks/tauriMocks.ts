@@ -22,7 +22,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 // Helper to setup common mocks
 export function setupTauriMocks() {
-  mockInvoke.mockImplementation((cmd: string, args?: any) => {
+  mockInvoke.mockImplementation((cmd: string, _args?: any) => {
     switch (cmd) {
       case 'get_duration':
         return Promise.resolve(120.5);
@@ -42,7 +42,7 @@ export function setupTauriMocks() {
   mockOpen.mockResolvedValue({ path: '/selected/file.mp4' });
   mockSave.mockResolvedValue({ path: '/output/file.mp4' });
 
-  mockListen.mockImplementation((event: string, callback: any) => {
+  mockListen.mockImplementation((_event: string, _callback: any) => {
     return Promise.resolve(() => {}); // unlisten function
   });
 }

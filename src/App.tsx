@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import VideoProcessor from './components/VideoProcessor'
 import LogFileInfo from './components/LogFileInfo'
