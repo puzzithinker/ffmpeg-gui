@@ -9,7 +9,7 @@
     "core:default",
     "dialog:allow-open",
     "dialog:allow-save",
-    "core:path:allow-app-log-dir",
-    "core:event:allow-listen"
+    "core:event:allow-listen",
+    "core:path:default"
   ]
 }
