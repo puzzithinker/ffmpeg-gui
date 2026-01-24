@@ -57,6 +57,9 @@ function App() {
           }
 
           await appWindow.close()
+        } else {
+          hasConfirmedClose = true
+          await appWindow.close()
         }
         // If not processing, allow default close behavior
       })
