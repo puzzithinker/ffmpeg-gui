@@ -116,34 +116,50 @@ async fn monitor_ffmpeg_progress(
     app: AppHandle,
     state: AppState,
 ) {
-    let reader = BufReader::new(stderr);
-    let mut lines = reader.lines();
-    let mut stderr_tail: VecDeque<String> = VecDeque::with_capacity(20);
+    let mut reader = BufReader::new(stderr);
+    let mut buf = Vec::new();
+    let mut stderr_tail: VecDeque<String> = VecDeque::with_capacity(50);
 
-    while let Ok(Some(line)) = lines.next_line().await {
-        log::debug!("ffmpeg stderr [{}]: {}", job_id, line);
-        if stderr_tail.len() == 20 {
-            stderr_tail.pop_front();
+    while let Ok(bytes_read) = reader.read_until(b'\n', &mut buf).await {
+        if bytes_read == 0 {
+            break;
         }
-        stderr_tail.push_back(line.clone());
 
-        if let Some(current_seconds) = parse_ffmpeg_time(&line) {
-            let percent = calculate_progress_percentage(current_seconds, duration);
+        // ffmpeg progress lines are often separated by \r; split and process each part
+        let line = String::from_utf8_lossy(&buf).to_string();
+        buf.clear();
 
-            let _ = app.emit(
-                "ffmpeg-progress",
-                ProgressPayload {
-                    job_id: job_id.to_string(),
-                    seconds: current_seconds,
-                    percent,
-                },
-            );
-            log::info!(
-                "Emitted ffmpeg-progress for job {}: seconds={}, percent={}",
-                job_id,
-                current_seconds,
-                percent
-            );
+        for segment in line.split('\r') {
+            let trimmed = segment.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            log::debug!("ffmpeg stderr [{}]: {}", job_id, trimmed);
+
+            if stderr_tail.len() == 50 {
+                stderr_tail.pop_front();
+            }
+            stderr_tail.push_back(trimmed.to_string());
+
+            if let Some(current_seconds) = parse_ffmpeg_time(trimmed) {
+                let percent = calculate_progress_percentage(current_seconds, duration);
+
+                let _ = app.emit(
+                    "ffmpeg-progress",
+                    ProgressPayload {
+                        job_id: job_id.to_string(),
+                        seconds: current_seconds,
+                        percent,
+                    },
+                );
+                log::info!(
+                    "Emitted ffmpeg-progress for job {}: seconds={}, percent={}",
+                    job_id,
+                    current_seconds,
+                    percent
+                );
+            }
         }
     }
 
