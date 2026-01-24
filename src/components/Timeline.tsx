@@ -1,17 +1,12 @@
 import React, { useState, useCallback } from 'react'
 import { useVideoStore } from '../store/useVideoStore'
+import { formatTime } from '../utils/timeFormatting'
 
 const Timeline: React.FC = () => {
   const { videoFile, trimSettings, setTrimSettings } = useVideoStore()
   const [isDragging, setIsDragging] = useState<'start' | 'end' | null>(null)
 
   if (!videoFile) return null
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
 
   const handleMouseDown = useCallback((handle: 'start' | 'end') => {
     setIsDragging(handle)
