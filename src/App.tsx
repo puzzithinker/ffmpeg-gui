@@ -63,10 +63,18 @@ function App() {
             await logger.error('[App] Failed to cancel during close', error)
           }
 
+          if (unlisten) {
+            unlisten()
+            unlisten = null
+          }
           await appWindow.close()
         } else {
           hasConfirmedClose = true
           await logger.log('[App] Closing window (no active job)')
+          if (unlisten) {
+            unlisten()
+            unlisten = null
+          }
           await appWindow.close()
         }
         // If not processing, allow default close behavior
