@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useVideoStore } from '../store/useVideoStore'
 import { tauriAPI } from '../lib/tauri-api'
+import { logger } from '../lib/logger'
 
 const VideoPreview: React.FC = () => {
   const { videoFile } = useVideoStore()
@@ -10,12 +11,12 @@ const VideoPreview: React.FC = () => {
     const getVideoUrl = async () => {
       if (videoFile) {
         try {
-          console.log('[VideoPreview] Getting video URL for:', videoFile.path)
+          await logger.log(`[VideoPreview] Getting video URL for: ${videoFile.path}`)
           const url = await tauriAPI.getVideoUrl(videoFile.path)
-          console.log('[VideoPreview] Generated video URL:', url)
+          await logger.log(`[VideoPreview] Generated video URL: ${url}`)
           setVideoUrl(url)
         } catch (error) {
-          console.error('[VideoPreview] Failed to get video URL:', error)
+          await logger.error('[VideoPreview] Failed to get video URL', error)
           setVideoUrl(null)
         }
       } else {
@@ -38,18 +39,18 @@ const VideoPreview: React.FC = () => {
             className="w-full h-full"
             controls
             src={videoUrl}
-            onError={(e) => {
+            onError={async (e) => {
               const target = e.target as HTMLVideoElement
-              console.error('[VideoPreview] Video element error:', {
-                error: target.error,
+              const errorDetails = {
                 code: target.error?.code,
                 message: target.error?.message,
                 src: videoUrl
-              })
+              }
+              await logger.error('[VideoPreview] Video element error', errorDetails)
             }}
-            onLoadStart={() => console.log('[VideoPreview] Video load started')}
-            onLoadedMetadata={() => console.log('[VideoPreview] Video metadata loaded')}
-            onCanPlay={() => console.log('[VideoPreview] Video can play')}
+            onLoadStart={async () => await logger.log('[VideoPreview] Video load started')}
+            onLoadedMetadata={async () => await logger.log('[VideoPreview] Video metadata loaded')}
+            onCanPlay={async () => await logger.log('[VideoPreview] Video can play')}
           >
             Your browser does not support the video tag.
           </video>

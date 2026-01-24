@@ -1,20 +1,21 @@
 import React from 'react'
 import { useVideoStore } from '../store/useVideoStore'
 import { tauriAPI } from '../lib/tauri-api'
+import { logger } from '../lib/logger'
 
 const FileSelector: React.FC = () => {
   const { videoFile, subtitleFile, setVideoFile, setSubtitleFile, setError, setTrimSettings } = useVideoStore()
 
   const handleVideoSelect = async () => {
     try {
-      console.log('[FileSelector] Starting video file selection...')
+      await logger.log('[FileSelector] Starting video file selection...')
       const filePath = await tauriAPI.selectVideoFile()
-      console.log('[FileSelector] Selected file path:', filePath)
+      await logger.log(`[FileSelector] Selected file path: ${filePath}`)
 
       if (filePath) {
-        console.log('[FileSelector] Getting video duration...')
+        await logger.log('[FileSelector] Getting video duration...')
         const duration = await tauriAPI.getVideoDuration(filePath)
-        console.log('[FileSelector] Got duration:', duration)
+        await logger.log(`[FileSelector] Got duration: ${duration}`)
 
         const fileName = filePath.split(/[/\\]/).pop() || 'Unknown'
 
@@ -26,10 +27,10 @@ const FileSelector: React.FC = () => {
 
         setTrimSettings({ startTime: 0, endTime: duration })
         setError(null)
-        console.log('[FileSelector] Video file loaded successfully')
+        await logger.log('[FileSelector] Video file loaded successfully')
       }
     } catch (error) {
-      console.error('[FileSelector] Error loading video:', error)
+      await logger.error('[FileSelector] Error loading video', error)
       setError(`Failed to load video: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }

@@ -16,6 +16,8 @@ pub fn run() {
             commands::video::check_ffmpeg_availability,
             commands::process::process_video,
             commands::process::cancel_process,
+            commands::logging::write_frontend_log,
+            commands::logging::get_log_file_path,
         ])
         .setup(|app| {
             app.handle().plugin(
