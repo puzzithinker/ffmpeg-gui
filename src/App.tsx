@@ -25,42 +25,50 @@ function App() {
 
   // Set up window close handler
   useEffect(() => {
+    let unlisten: (() => void) | null = null
+    let hasConfirmedClose = false
+
     const setupCloseHandler = async () => {
       const appWindow = getCurrentWindow()
 
-      const unlisten = await appWindow.onCloseRequested(async (event) => {
+      unlisten = await appWindow.onCloseRequested(async (event) => {
+        if (hasConfirmedClose) {
+          return
+        }
+
         if (isProcessing && currentJobId) {
           event.preventDefault()
 
-          // Show confirmation dialog
-          const shouldClose = window.confirm(
-            'Processing in progress. Cancel and close?'
-          )
+          const shouldClose = window.confirm('Processing in progress. Cancel and close?')
 
-          if (shouldClose) {
-            // Cancel the job
-            try {
-              await tauriAPI.cancelProcess(currentJobId)
-              setCurrentJobId(null)
-              setProcessing(false)
-              setProcessingProgress(null)
-            } catch (error) {
-              console.error('Failed to cancel process:', error)
-            }
-            // Close the window
-            await appWindow.close()
+          if (!shouldClose) {
+            return
           }
-        }
-      })
 
-      return unlisten
+          hasConfirmedClose = true
+
+          try {
+            await tauriAPI.cancelProcess(currentJobId)
+            setCurrentJobId(null)
+            setProcessing(false)
+            setProcessingProgress(null)
+          } catch (error) {
+            console.error('Failed to cancel process:', error)
+          }
+
+          await appWindow.close()
+        }
+        // If not processing, allow default close behavior
+      })
     }
 
-    setupCloseHandler().then((unlisten) => {
-      return () => {
-        unlisten?.()
+    void setupCloseHandler()
+
+    return () => {
+      if (unlisten) {
+        unlisten()
       }
-    })
+    }
   }, [isProcessing, currentJobId, setCurrentJobId, setProcessing, setProcessingProgress])
 
   // Blocking modal if FFmpeg is not available
