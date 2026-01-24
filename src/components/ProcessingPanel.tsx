@@ -28,52 +28,78 @@ const ProcessingPanel: React.FC = () => {
     const setupListeners = async () => {
       unlistenProgress = await tauriAPI.onFFmpegProgress((event) => {
         const state = useVideoStore.getState()
-        void logger.log(`[ProcessingPanel] Progress event payload: jobId=${event.jobId}, seconds=${event.seconds}, percent=${event.percent}, stateJob=${state.currentJobId}`)
-        if (event.jobId === state.currentJobId) {
-          state.setProcessingProgress({
-            currentTime: event.seconds,
-            percentage: event.percent,
-          })
-          void logger.log(`[ProcessingPanel] Progress for jobId=${event.jobId}: ${event.percent.toFixed(2)}% at ${event.seconds}s`)
+        const effectiveJobId = event.jobId || state.currentJobId
+        void logger.log(`[ProcessingPanel] Progress event payload: jobId=${event.jobId}, seconds=${event.seconds}, percent=${event.percent}, stateJob=${state.currentJobId}, effectiveJob=${effectiveJobId}`)
+
+        if (!effectiveJobId) {
+          void logger.log('[ProcessingPanel] Dropping progress event because no job id is available')
+          return
         }
+
+        if (!state.currentJobId) {
+          state.setCurrentJobId(effectiveJobId)
+        } else if (state.currentJobId !== effectiveJobId) {
+          void logger.log(`[ProcessingPanel] Progress jobId mismatch (expected ${state.currentJobId}, got ${effectiveJobId}) — applying anyway`)
+        }
+
+        state.setProcessingProgress({
+          currentTime: event.seconds,
+          percentage: event.percent,
+        })
+        void logger.log(`[ProcessingPanel] Progress applied for jobId=${effectiveJobId}: ${event.percent.toFixed(2)}% at ${event.seconds}s`)
       })
 
       unlistenComplete = await tauriAPI.onFFmpegComplete((jobId) => {
         const state = useVideoStore.getState()
-        void logger.log(`[ProcessingPanel] Complete event payload: jobId=${jobId}, stateJob=${state.currentJobId}`)
-        if (jobId === state.currentJobId) {
-          state.setProcessingProgress({ currentTime: state.trimSettings.endTime - state.trimSettings.startTime, percentage: 100 })
-          setTimeout(() => {
-            state.setProcessing(false)
-            state.setProcessingProgress(null)
-            state.setCurrentJobId(null)
-          }, 1000)
-          void logger.log(`[ProcessingPanel] Processing complete for jobId=${jobId}`)
+        const effectiveJobId = jobId || state.currentJobId
+        void logger.log(`[ProcessingPanel] Complete event payload: jobId=${jobId}, stateJob=${state.currentJobId}, effectiveJob=${effectiveJobId}`)
+
+        if (!effectiveJobId) {
+          void logger.log('[ProcessingPanel] Dropping complete event because no job id is available')
+          return
         }
+
+        state.setProcessingProgress({ currentTime: state.trimSettings.endTime - state.trimSettings.startTime, percentage: 100 })
+        setTimeout(() => {
+          state.setProcessing(false)
+          state.setProcessingProgress(null)
+          state.setCurrentJobId(null)
+        }, 1000)
+        void logger.log(`[ProcessingPanel] Processing complete for jobId=${effectiveJobId}`)
       })
 
       unlistenError = await tauriAPI.onFFmpegError((jobId, error) => {
         const state = useVideoStore.getState()
-        void logger.log(`[ProcessingPanel] Error event payload: jobId=${jobId}, stateJob=${state.currentJobId}, error=${error}`)
-        if (jobId === state.currentJobId) {
-          state.setError(`Processing failed: ${error}`)
-          state.setProcessing(false)
-          state.setProcessingProgress(null)
-          state.setCurrentJobId(null)
-          void logger.error(`[ProcessingPanel] Processing failed for jobId=${jobId}`, error)
+        const effectiveJobId = jobId || state.currentJobId
+        void logger.log(`[ProcessingPanel] Error event payload: jobId=${jobId}, stateJob=${state.currentJobId}, effectiveJob=${effectiveJobId}, error=${error}`)
+
+        if (!effectiveJobId) {
+          void logger.log('[ProcessingPanel] Dropping error event because no job id is available')
+          return
         }
+
+        state.setError(`Processing failed: ${error}`)
+        state.setProcessing(false)
+        state.setProcessingProgress(null)
+        state.setCurrentJobId(null)
+        void logger.error(`[ProcessingPanel] Processing failed for jobId=${effectiveJobId}`, error)
       })
 
       unlistenCancelled = await tauriAPI.onFFmpegCancelled((jobId) => {
         const state = useVideoStore.getState()
-        void logger.log(`[ProcessingPanel] Cancelled event payload: jobId=${jobId}, stateJob=${state.currentJobId}`)
-        if (jobId === state.currentJobId) {
-          state.setError('Processing cancelled')
-          state.setProcessing(false)
-          state.setProcessingProgress(null)
-          state.setCurrentJobId(null)
-          void logger.log(`[ProcessingPanel] Processing cancelled for jobId=${jobId}`)
+        const effectiveJobId = jobId || state.currentJobId
+        void logger.log(`[ProcessingPanel] Cancelled event payload: jobId=${jobId}, stateJob=${state.currentJobId}, effectiveJob=${effectiveJobId}`)
+
+        if (!effectiveJobId) {
+          void logger.log('[ProcessingPanel] Dropping cancelled event because no job id is available')
+          return
         }
+
+        state.setError('Processing cancelled')
+        state.setProcessing(false)
+        state.setProcessingProgress(null)
+        state.setCurrentJobId(null)
+        void logger.log(`[ProcessingPanel] Processing cancelled for jobId=${effectiveJobId}`)
       })
     }
 
