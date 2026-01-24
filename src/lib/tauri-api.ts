@@ -73,7 +73,7 @@ export const tauriAPI = {
 
   // Video operations
   getVideoDuration: async (filePath: string): Promise<number> => {
-    return await invoke<number>('get_duration', { filePath });
+    return await invoke<number>('get_duration', { file_path: filePath });
   },
 
   getVideoUrl: async (filePath: string): Promise<string> => {
@@ -90,11 +90,19 @@ export const tauriAPI = {
 
   // Processing operations
   processVideo: async (params: ProcessVideoParams): Promise<string> => {
-    return await invoke<string>('process_video', { params });
+    return await invoke<string>('process_video', {
+      params: {
+        input_file: params.inputFile,
+        output_file: params.outputFile,
+        start_time: params.startTime,
+        end_time: params.endTime,
+        subtitle_file: params.subtitleFile,
+      },
+    });
   },
 
   cancelProcess: async (jobId: string): Promise<void> => {
-    return await invoke<void>('cancel_process', { jobId });
+    return await invoke<void>('cancel_process', { job_id: jobId });
   },
 
   // Event listeners
