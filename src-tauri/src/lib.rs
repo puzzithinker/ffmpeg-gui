@@ -18,13 +18,12 @@ pub fn run() {
             commands::process::cancel_process,
         ])
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Debug)
+                    .build(),
+            )?;
+            log::info!("FFmpeg GUI starting up...");
             Ok(())
         })
         .run(tauri::generate_context!())

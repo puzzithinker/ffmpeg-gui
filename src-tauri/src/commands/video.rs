@@ -14,10 +14,15 @@ pub struct ProbeOutput {
 
 #[tauri::command]
 pub async fn get_duration(file_path: String) -> Result<f64, String> {
+    log::info!("Getting duration for file: {}", file_path);
+
     // Input validation
     if !Path::new(&file_path).exists() {
+        log::error!("File does not exist: {}", file_path);
         return Err("File does not exist".to_string());
     }
+
+    log::debug!("File exists, spawning ffprobe...");
 
     // Spawn ffprobe
     let output = Command::new("ffprobe")
@@ -29,19 +34,32 @@ pub async fn get_duration(file_path: String) -> Result<f64, String> {
         ])
         .output()
         .await
-        .map_err(|e| format!("Failed to spawn ffprobe: {}. Make sure ffprobe is installed and in PATH.", e))?;
+        .map_err(|e| {
+            log::error!("Failed to spawn ffprobe: {}", e);
+            format!("Failed to spawn ffprobe: {}. Make sure ffprobe is installed and in PATH.", e)
+        })?;
 
     if !output.status.success() {
+        log::error!("ffprobe failed with exit code: {:?}", output.status.code());
         return Err(format!("ffprobe failed with exit code: {:?}", output.status.code()));
     }
 
+    log::debug!("ffprobe output: {}", String::from_utf8_lossy(&output.stdout));
+
     // Parse JSON output
     let probe_data: ProbeOutput = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("Failed to parse ffprobe output: {}", e))?;
+        .map_err(|e| {
+            log::error!("Failed to parse ffprobe output: {}", e);
+            format!("Failed to parse ffprobe output: {}", e)
+        })?;
 
     let duration = probe_data.format.duration.parse::<f64>()
-        .map_err(|e| format!("Failed to parse duration: {}", e))?;
+        .map_err(|e| {
+            log::error!("Failed to parse duration: {}", e);
+            format!("Failed to parse duration: {}", e)
+        })?;
 
+    log::info!("Successfully got duration: {} seconds", duration);
     Ok(duration)
 }
 

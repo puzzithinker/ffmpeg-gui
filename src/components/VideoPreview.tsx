@@ -10,10 +10,12 @@ const VideoPreview: React.FC = () => {
     const getVideoUrl = async () => {
       if (videoFile) {
         try {
+          console.log('[VideoPreview] Getting video URL for:', videoFile.path)
           const url = await tauriAPI.getVideoUrl(videoFile.path)
+          console.log('[VideoPreview] Generated video URL:', url)
           setVideoUrl(url)
         } catch (error) {
-          console.error('Failed to get video URL:', error)
+          console.error('[VideoPreview] Failed to get video URL:', error)
           setVideoUrl(null)
         }
       } else {
@@ -36,6 +38,18 @@ const VideoPreview: React.FC = () => {
             className="w-full h-full"
             controls
             src={videoUrl}
+            onError={(e) => {
+              const target = e.target as HTMLVideoElement
+              console.error('[VideoPreview] Video element error:', {
+                error: target.error,
+                code: target.error?.code,
+                message: target.error?.message,
+                src: videoUrl
+              })
+            }}
+            onLoadStart={() => console.log('[VideoPreview] Video load started')}
+            onLoadedMetadata={() => console.log('[VideoPreview] Video metadata loaded')}
+            onCanPlay={() => console.log('[VideoPreview] Video can play')}
           >
             Your browser does not support the video tag.
           </video>

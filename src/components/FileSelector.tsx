@@ -7,9 +7,15 @@ const FileSelector: React.FC = () => {
 
   const handleVideoSelect = async () => {
     try {
+      console.log('[FileSelector] Starting video file selection...')
       const filePath = await tauriAPI.selectVideoFile()
+      console.log('[FileSelector] Selected file path:', filePath)
+
       if (filePath) {
+        console.log('[FileSelector] Getting video duration...')
         const duration = await tauriAPI.getVideoDuration(filePath)
+        console.log('[FileSelector] Got duration:', duration)
+
         const fileName = filePath.split(/[/\\]/).pop() || 'Unknown'
 
         setVideoFile({
@@ -20,8 +26,10 @@ const FileSelector: React.FC = () => {
 
         setTrimSettings({ startTime: 0, endTime: duration })
         setError(null)
+        console.log('[FileSelector] Video file loaded successfully')
       }
     } catch (error) {
+      console.error('[FileSelector] Error loading video:', error)
       setError(`Failed to load video: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
