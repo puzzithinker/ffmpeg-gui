@@ -121,6 +121,7 @@ async fn monitor_ffmpeg_progress(
     let mut stderr_tail: VecDeque<String> = VecDeque::with_capacity(20);
 
     while let Ok(Some(line)) = lines.next_line().await {
+        log::debug!("ffmpeg stderr [{}]: {}", job_id, line);
         if stderr_tail.len() == 20 {
             stderr_tail.pop_front();
         }
@@ -136,6 +137,12 @@ async fn monitor_ffmpeg_progress(
                     seconds: current_seconds,
                     percent,
                 },
+            );
+            log::info!(
+                "Emitted ffmpeg-progress for job {}: seconds={}, percent={}",
+                job_id,
+                current_seconds,
+                percent
             );
         }
     }

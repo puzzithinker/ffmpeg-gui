@@ -28,6 +28,7 @@ const ProcessingPanel: React.FC = () => {
     const setupListeners = async () => {
       unlistenProgress = await tauriAPI.onFFmpegProgress((event) => {
         const state = useVideoStore.getState()
+        void logger.log(`[ProcessingPanel] Progress event payload: jobId=${event.jobId}, seconds=${event.seconds}, percent=${event.percent}, stateJob=${state.currentJobId}`)
         if (event.jobId === state.currentJobId) {
           state.setProcessingProgress({
             currentTime: event.seconds,
@@ -39,6 +40,7 @@ const ProcessingPanel: React.FC = () => {
 
       unlistenComplete = await tauriAPI.onFFmpegComplete((jobId) => {
         const state = useVideoStore.getState()
+        void logger.log(`[ProcessingPanel] Complete event payload: jobId=${jobId}, stateJob=${state.currentJobId}`)
         if (jobId === state.currentJobId) {
           state.setProcessingProgress({ currentTime: state.trimSettings.endTime - state.trimSettings.startTime, percentage: 100 })
           setTimeout(() => {
@@ -52,6 +54,7 @@ const ProcessingPanel: React.FC = () => {
 
       unlistenError = await tauriAPI.onFFmpegError((jobId, error) => {
         const state = useVideoStore.getState()
+        void logger.log(`[ProcessingPanel] Error event payload: jobId=${jobId}, stateJob=${state.currentJobId}, error=${error}`)
         if (jobId === state.currentJobId) {
           state.setError(`Processing failed: ${error}`)
           state.setProcessing(false)
@@ -63,6 +66,7 @@ const ProcessingPanel: React.FC = () => {
 
       unlistenCancelled = await tauriAPI.onFFmpegCancelled((jobId) => {
         const state = useVideoStore.getState()
+        void logger.log(`[ProcessingPanel] Cancelled event payload: jobId=${jobId}, stateJob=${state.currentJobId}`)
         if (jobId === state.currentJobId) {
           state.setError('Processing cancelled')
           state.setProcessing(false)
