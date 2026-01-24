@@ -1,4 +1,5 @@
 use crate::state::{AppState, ProcessJob};
+use std::collections::VecDeque;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -69,6 +70,8 @@ pub async fn process_video(
     // Build ffmpeg arguments
     let args = build_ffmpeg_args(&params)?;
 
+    log::info!("Starting ffmpeg with args: {:?}", args);
+
     // Spawn ffmpeg process
     let mut child = Command::new("ffmpeg")
         .args(&args)
@@ -115,8 +118,14 @@ async fn monitor_ffmpeg_progress(
 ) {
     let reader = BufReader::new(stderr);
     let mut lines = reader.lines();
+    let mut stderr_tail: VecDeque<String> = VecDeque::with_capacity(20);
 
     while let Ok(Some(line)) = lines.next_line().await {
+        if stderr_tail.len() == 20 {
+            stderr_tail.pop_front();
+        }
+        stderr_tail.push_back(line.clone());
+
         if let Some(current_seconds) = parse_ffmpeg_time(&line) {
             let percent = calculate_progress_percentage(current_seconds, duration);
 
@@ -145,11 +154,21 @@ async fn monitor_ffmpeg_progress(
                         },
                     );
                 } else {
+                    let stderr_text = if stderr_tail.is_empty() {
+                        "No stderr captured".to_string()
+                    } else {
+                        stderr_tail.iter().cloned().collect::<Vec<_>>().join("\n")
+                    };
+
                     let _ = app.emit(
                         "ffmpeg-error",
                         ErrorPayload {
                             job_id: job_id.to_string(),
-                            error: format!("FFmpeg exited with code {:?}", status.code()),
+                            error: format!(
+                                "FFmpeg exited with code {:?}. Stderr:\n{}",
+                                status.code(),
+                                stderr_text
+                            ),
                         },
                     );
                 }

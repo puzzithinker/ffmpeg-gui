@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useVideoStore } from '../store/useVideoStore'
 import { tauriAPI } from '../lib/tauri-api'
+import { logger } from '../lib/logger'
 
 const ProcessingPanel: React.FC = () => {
   const {
@@ -31,6 +32,7 @@ const ProcessingPanel: React.FC = () => {
             currentTime: event.seconds,
             percentage: event.percent,
           })
+          void logger.log(`[ProcessingPanel] Progress for jobId=${event.jobId}: ${event.percent.toFixed(2)}% at ${event.seconds}s`)
         }
       })
 
@@ -42,6 +44,7 @@ const ProcessingPanel: React.FC = () => {
             setProcessingProgress(null)
             setCurrentJobId(null)
           }, 1000)
+          void logger.log(`[ProcessingPanel] Processing complete for jobId=${jobId}`)
         }
       })
 
@@ -51,6 +54,7 @@ const ProcessingPanel: React.FC = () => {
           setProcessing(false)
           setProcessingProgress(null)
           setCurrentJobId(null)
+          void logger.error(`[ProcessingPanel] Processing failed for jobId=${jobId}`, error)
         }
       })
 
@@ -60,6 +64,7 @@ const ProcessingPanel: React.FC = () => {
           setProcessing(false)
           setProcessingProgress(null)
           setCurrentJobId(null)
+          void logger.log(`[ProcessingPanel] Processing cancelled for jobId=${jobId}`)
         }
       })
     }
@@ -79,6 +84,7 @@ const ProcessingPanel: React.FC = () => {
       const filePath = await tauriAPI.selectOutputFile()
       if (filePath) {
         setOutputPath(filePath)
+        await logger.log(`[ProcessingPanel] Selected output file: ${filePath}`)
       }
     } catch (error) {
       setError(`Failed to select output file: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -92,6 +98,7 @@ const ProcessingPanel: React.FC = () => {
     }
 
     try {
+      await logger.log(`[ProcessingPanel] Starting processing: input=${videoFile.path}, output=${outputPath}, trim=${trimSettings.startTime}-${trimSettings.endTime}, subtitle=${subtitleFile?.path ?? 'none'}`)
       setProcessing(true)
       setProcessingProgress({ currentTime: 0, percentage: 0 })
       setError(null)
@@ -105,10 +112,12 @@ const ProcessingPanel: React.FC = () => {
       })
 
       setCurrentJobId(jobId)
+      await logger.log(`[ProcessingPanel] Processing started with jobId=${jobId}`)
     } catch (error) {
       setError(`Failed to start processing: ${error instanceof Error ? error.message : 'Unknown error'}`)
       setProcessing(false)
       setProcessingProgress(null)
+      await logger.error('[ProcessingPanel] Failed to start processing', error)
     }
   }
 
