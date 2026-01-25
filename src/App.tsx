@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import VideoProcessor from './components/VideoProcessor'
-import LogFileInfo from './components/LogFileInfo'
 import { tauriAPI } from './lib/tauri-api'
 import { useVideoStore } from './store/useVideoStore'
 import { logger } from './lib/logger'
@@ -182,9 +181,6 @@ function App() {
             Trim videos and burn subtitles with ease
           </p>
         </header>
-        <div className="mb-4">
-          <LogFileInfo />
-        </div>
         <VideoProcessor />
       </div>
     </div>

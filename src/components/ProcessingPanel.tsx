@@ -18,6 +18,9 @@ const ProcessingPanel: React.FC = () => {
   } = useVideoStore()
 
   const [outputPath, setOutputPath] = useState('')
+  const trimmedDuration = Math.max(0, trimSettings.endTime - trimSettings.startTime)
+  const statusLabel = isProcessing ? 'Processing' : videoFile ? 'Ready to export' : 'Awaiting video'
+  const statusStyle = isProcessing ? 'bg-primary-100 text-primary-700 border-primary-200' : videoFile ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'
 
   useEffect(() => {
     let unlistenProgress: (() => void) | null = null
@@ -169,7 +172,12 @@ const ProcessingPanel: React.FC = () => {
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
-      <h2 className="text-xl font-semibold mb-4">Export Settings</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-semibold">Export</h2>
+        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${statusStyle}`}>
+          {statusLabel}
+        </span>
+      </div>
 
       <div className="space-y-4">
         <div>
@@ -202,29 +210,52 @@ const ProcessingPanel: React.FC = () => {
 
         {videoFile && (
           <div className="bg-gray-50 p-3 rounded-md">
-            <h3 className="font-medium text-gray-900 mb-2">Processing Summary</h3>
-            <div className="space-y-1 text-sm text-gray-600">
-              <div>Input: {videoFile.name}</div>
+            <h3 className="font-medium text-gray-900 mb-2">Summary</h3>
+            <div className="grid grid-cols-2 gap-3 text-sm text-gray-700">
               <div>
-                Duration: {Math.floor((trimSettings.endTime - trimSettings.startTime) / 60)}:
-                {Math.floor((trimSettings.endTime - trimSettings.startTime) % 60).toString().padStart(2, '0')}
+                <p className="text-xs uppercase tracking-wide text-gray-500">Input</p>
+                <p className="font-medium truncate">{videoFile.name}</p>
               </div>
-              {subtitleFile && <div>Subtitles: {subtitleFile.name}</div>}
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">Duration</p>
+                <p className="font-medium">
+                  {Math.floor(trimmedDuration / 60)}:
+                  {Math.floor(trimmedDuration % 60).toString().padStart(2, '0')}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">Output</p>
+                <p className="font-medium truncate">{outputPath ? outputPath.split(/[/\\]/).pop() : 'Not selected'}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">Subtitles</p>
+                <p className="font-medium">{subtitleFile ? subtitleFile.name : 'None'}</p>
+              </div>
             </div>
           </div>
         )}
 
         {isProcessing && processingProgress && (
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span>Processing...</span>
-              <span>{processingProgress.percentage.toFixed(1)}%</span>
+          <div className="space-y-3 bg-primary-50 border border-primary-100 rounded-md p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-primary-700">Job</p>
+                <p className="text-sm font-medium text-primary-900">{currentJobId?.slice(0, 8) ?? 'Active'}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs uppercase tracking-wide text-primary-700">Progress</p>
+                <p className="text-3xl font-semibold text-primary-900">{processingProgress.percentage.toFixed(1)}%</p>
+              </div>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="w-full bg-primary-100 rounded-full h-2">
               <div
-                className="bg-primary-500 h-2 rounded-full transition-all duration-500"
+                className="bg-primary-500 h-2 rounded-full transition-all duration-200"
                 style={{ width: `${processingProgress.percentage}%` }}
               />
+            </div>
+            <div className="flex justify-between text-xs text-primary-800">
+              <span>{processingProgress.currentTime.toFixed(1)}s processed</span>
+              <span>{trimmedDuration ? Math.min(100, processingProgress.percentage).toFixed(1) : '0.0'}% of trim</span>
             </div>
           </div>
         )}
