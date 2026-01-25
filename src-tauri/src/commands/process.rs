@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncReadExt, BufReader};
 use tokio::process::Command;
 use uuid::Uuid;
 
@@ -162,7 +162,7 @@ async fn monitor_ffmpeg_progress(
 
                 // Drop the delimiter(s) and continue parsing the remainder
                 let mut rest_iter = rest.chars();
-                let first = rest_iter.next();
+                let _first = rest_iter.next();
                 let remaining_rest: String = rest_iter.collect();
                 let mut rest_clean = remaining_rest;
                 // Remove an additional delimiter if present (handles \r\n)
