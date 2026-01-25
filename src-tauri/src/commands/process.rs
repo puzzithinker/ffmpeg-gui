@@ -73,10 +73,21 @@ pub async fn process_video(
     log::info!("Starting ffmpeg with args: {:?}", args);
 
     // Spawn ffmpeg process
-    let mut child = Command::new("ffmpeg")
+    let mut command = Command::new("ffmpeg");
+    command
         .args(&args)
         .stderr(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped());
+
+    // Hide console window on Windows
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = command
         .spawn()
         .map_err(|e| format!("Failed to spawn ffmpeg: {}. Make sure ffmpeg is installed and in PATH.", e))?;
 
