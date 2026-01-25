@@ -215,6 +215,7 @@ const ProcessingPanel: React.FC = () => {
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">Input</p>
                 <p className="font-medium truncate">{videoFile.name}</p>
+                <p className="text-xs text-gray-500 break-all">{videoFile.path}</p>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">Duration</p>
@@ -226,10 +227,12 @@ const ProcessingPanel: React.FC = () => {
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">Output</p>
                 <p className="font-medium truncate">{outputPath ? outputPath.split(/[/\\]/).pop() : 'Not selected'}</p>
+                {outputPath && <p className="text-xs text-gray-500 break-all">{outputPath}</p>}
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">Subtitles</p>
                 <p className="font-medium">{subtitleFile ? subtitleFile.name : 'None'}</p>
+                {subtitleFile && <p className="text-xs text-gray-500 break-all">{subtitleFile.path}</p>}
               </div>
             </div>
           </div>

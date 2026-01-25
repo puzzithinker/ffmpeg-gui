@@ -69,8 +69,9 @@ const FileSelector: React.FC = () => {
         <div className="border-2 border-dashed border-gray-300 rounded-lg p-6">
           {videoFile ? (
             <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-gray-900">{videoFile.name}</p>
+              <div className="min-w-0">
+                <p className="font-medium text-gray-900 truncate">{videoFile.name}</p>
+                <p className="text-xs text-gray-500 break-all">{videoFile.path}</p>
                 <p className="text-sm text-gray-500">
                   Duration: {Math.floor(videoFile.duration / 60)}:{Math.floor(videoFile.duration % 60).toString().padStart(2, '0')}
                 </p>
@@ -110,8 +111,9 @@ const FileSelector: React.FC = () => {
         <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
           {subtitleFile ? (
             <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-gray-900">{subtitleFile.name}</p>
+              <div className="min-w-0">
+                <p className="font-medium text-gray-900 truncate">{subtitleFile.name}</p>
+                <p className="text-xs text-gray-500 break-all">{subtitleFile.path}</p>
                 <p className="text-sm text-gray-500">Subtitle file loaded</p>
               </div>
               <button
