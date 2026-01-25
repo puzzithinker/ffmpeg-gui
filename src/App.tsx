@@ -26,20 +26,21 @@ function App() {
   // Set up window close handler
   useEffect(() => {
     let unlisten: (() => void) | null = null
-    let hasConfirmedClose = false
+    let isClosing = false
 
     const setupCloseHandler = async () => {
       const appWindow = getCurrentWindow()
 
       unlisten = await appWindow.onCloseRequested(async (event) => {
+        event.preventDefault()
         await logger.log('[App] Close requested')
 
-        if (hasConfirmedClose) {
+        if (isClosing) {
+          await logger.log('[App] Close already in progress')
           return
         }
 
         if (isProcessing && currentJobId) {
-          event.preventDefault()
           await logger.log(`[App] Close blocked, processing job=${currentJobId}`)
 
           const shouldClose = window.confirm('Processing in progress. Cancel and close?')
@@ -49,7 +50,7 @@ function App() {
             return
           }
 
-          hasConfirmedClose = true
+          isClosing = true
 
           try {
             await tauriAPI.cancelProcess(currentJobId)
@@ -61,22 +62,16 @@ function App() {
             console.error('Failed to cancel process:', error)
             await logger.error('[App] Failed to cancel during close', error)
           }
-
-          if (unlisten) {
-            unlisten()
-            unlisten = null
-          }
-          await appWindow.close()
         } else {
-          hasConfirmedClose = true
+          isClosing = true
           await logger.log('[App] Closing window (no active job)')
-          if (unlisten) {
-            unlisten()
-            unlisten = null
-          }
-          await appWindow.close()
         }
-        // If not processing, allow default close behavior
+
+        if (unlisten) {
+          unlisten()
+          unlisten = null
+        }
+        await appWindow.close()
       })
     }
 
