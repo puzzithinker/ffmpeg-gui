@@ -117,48 +117,61 @@ async fn monitor_ffmpeg_progress(
     state: AppState,
 ) {
     let mut reader = BufReader::new(stderr);
-    let mut buf = Vec::new();
+    let mut buf = [0u8; 2048];
+    let mut pending = String::new();
     let mut stderr_tail: VecDeque<String> = VecDeque::with_capacity(50);
 
-    while let Ok(bytes_read) = reader.read_until(b'\n', &mut buf).await {
+    while let Ok(bytes_read) = reader.read(&mut buf).await {
         if bytes_read == 0 {
             break;
         }
 
-        // ffmpeg progress lines are often separated by \r; split and process each part
-        let line = String::from_utf8_lossy(&buf).to_string();
-        buf.clear();
+        pending.push_str(&String::from_utf8_lossy(&buf[..bytes_read]));
 
-        for segment in line.split('\r') {
-            let trimmed = segment.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
+        loop {
+            if let Some(pos) = pending.find(['\r', '\n']) {
+                let (segment, rest) = pending.split_at(pos);
+                let trimmed = segment.trim();
+                if !trimmed.is_empty() {
+                    log::debug!("ffmpeg stderr [{}]: {}", job_id, trimmed);
 
-            log::debug!("ffmpeg stderr [{}]: {}", job_id, trimmed);
+                    if stderr_tail.len() == 50 {
+                        stderr_tail.pop_front();
+                    }
+                    stderr_tail.push_back(trimmed.to_string());
 
-            if stderr_tail.len() == 50 {
-                stderr_tail.pop_front();
-            }
-            stderr_tail.push_back(trimmed.to_string());
+                    if let Some(current_seconds) = parse_ffmpeg_time(trimmed) {
+                        let percent = calculate_progress_percentage(current_seconds, duration);
 
-            if let Some(current_seconds) = parse_ffmpeg_time(trimmed) {
-                let percent = calculate_progress_percentage(current_seconds, duration);
+                        let _ = app.emit(
+                            "ffmpeg-progress",
+                            ProgressPayload {
+                                job_id: job_id.to_string(),
+                                seconds: current_seconds,
+                                percent,
+                            },
+                        );
+                        log::info!(
+                            "Emitted ffmpeg-progress for job {}: seconds={}, percent={}",
+                            job_id,
+                            current_seconds,
+                            percent
+                        );
+                    }
+                }
 
-                let _ = app.emit(
-                    "ffmpeg-progress",
-                    ProgressPayload {
-                        job_id: job_id.to_string(),
-                        seconds: current_seconds,
-                        percent,
-                    },
-                );
-                log::info!(
-                    "Emitted ffmpeg-progress for job {}: seconds={}, percent={}",
-                    job_id,
-                    current_seconds,
-                    percent
-                );
+                // Drop the delimiter(s) and continue parsing the remainder
+                let mut rest_iter = rest.chars();
+                let first = rest_iter.next();
+                let remaining_rest: String = rest_iter.collect();
+                let mut rest_clean = remaining_rest;
+                // Remove an additional delimiter if present (handles \r\n)
+                if rest_clean.starts_with('\n') || rest_clean.starts_with('\r') {
+                    rest_clean = rest_clean[1..].to_string();
+                }
+                pending = rest_clean;
+            } else {
+                break;
             }
         }
     }
