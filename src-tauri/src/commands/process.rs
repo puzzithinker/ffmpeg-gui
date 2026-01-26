@@ -298,12 +298,10 @@ fn build_ffmpeg_args(params: &ProcessVideoParams) -> Result<Vec<String>, String>
     }
 
     if let Some(ref subtitle_file) = params.subtitle_file {
-        // Escape path for ffmpeg filter (handle Windows paths and special chars)
-        let escaped = subtitle_file
-            .replace("\\", "\\\\")
-            .replace(":", "\\:");
+        // Escape path for ffmpeg filter (handle Windows paths, drive-letter colons, and quotes).
+        let escaped = escape_subtitle_path(subtitle_file);
         args.push("-vf".to_string());
-        args.push(format!("subtitles={}", escaped));
+        args.push(format!("subtitles=filename='{}'", escaped));
     }
 
     args.push("-c:v".to_string());
@@ -314,6 +312,18 @@ fn build_ffmpeg_args(params: &ProcessVideoParams) -> Result<Vec<String>, String>
     args.push(params.output_file.clone());
 
     Ok(args)
+}
+
+// FFmpeg's filter syntax treats ':' as an option separator and '\' as an escape character.
+// To support Windows drive letters (e.g. C:\) and paths with spaces/quotes, we normalise
+// the path for the subtitles filter:
+//   - Replace backslashes with forward slashes so we don't need to double-escape them.
+//   - Escape drive-letter colons so they aren't interpreted as option separators.
+//   - Escape single quotes because the value is wrapped in single quotes.
+fn escape_subtitle_path(path: &str) -> String {
+    let mut escaped = path.replace('\\', "/");
+    escaped = escaped.replace(':', r"\:");
+    escaped.replace('\'', r"\'")
 }
 
 #[cfg(test)]
@@ -507,10 +517,9 @@ mod tests {
         let vf_idx = args.iter().position(|x| x == "-vf").unwrap();
         let filter = &args[vf_idx + 1];
 
-        // Should escape backslashes and colons
-        assert!(filter.contains("\\\\"));
-        assert!(filter.contains("\\:"));
-        assert!(filter.starts_with("subtitles="));
+        // Should escape drive-letter colon and wrap as filename=
+        assert!(filter.starts_with("subtitles=filename='"));
+        assert!(filter.contains("C\\:/Users/Name/subtitles.srt"));
     }
 
     #[test]
@@ -528,6 +537,26 @@ mod tests {
         assert!(args.contains(&"-vf".to_string()));
         let vf_idx = args.iter().position(|x| x == "-vf").unwrap();
         let filter = &args[vf_idx + 1];
-        assert!(filter.starts_with("subtitles="));
+        assert!(filter.starts_with("subtitles=filename='"));
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_with_spaces_and_quotes() {
+        let params = ProcessVideoParams {
+            input_file: "/input/video.mp4".to_string(),
+            output_file: "/output/video.mp4".to_string(),
+            start_time: None,
+            end_time: None,
+            subtitle_file: Some("D:\\My Subs\\O'Connor\\show.srt".to_string()),
+        };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        let vf_idx = args.iter().position(|x| x == "-vf").unwrap();
+        let filter = &args[vf_idx + 1];
+        assert_eq!(
+            filter,
+            "subtitles=filename='D\\:/My Subs/O\\'Connor/show.srt'"
+        );
     }
 }
