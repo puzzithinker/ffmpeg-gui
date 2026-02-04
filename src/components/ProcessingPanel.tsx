@@ -8,6 +8,7 @@ const ProcessingPanel: React.FC = () => {
     videoFile,
     subtitleFile,
     trimSettings,
+    brightness,
     isProcessing,
     processingProgress,
     setProcessing,
@@ -233,6 +234,14 @@ const ProcessingPanel: React.FC = () => {
                 <p className="text-xs uppercase tracking-wide text-gray-500">Subtitles</p>
                 <p className="font-medium">{subtitleFile ? subtitleFile.name : 'None'}</p>
                 {subtitleFile && <p className="text-xs text-gray-500 break-all">{subtitleFile.path}</p>}
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">Brightness</p>
+                <p className="font-medium">{brightness > 0 ? `+${brightness}%` : `${brightness}%`}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">Brightness</p>
+                <p className="font-medium">{brightness > 0 ? '+' : ''}{brightness}%</p>
               </div>
             </div>
           </div>

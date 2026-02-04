@@ -20,6 +20,7 @@ export interface ProcessingOptions {
   startTime?: number
   endTime?: number
   subtitleFile?: string
+  brightness?: number
 }
 
 export interface ProcessingProgress {

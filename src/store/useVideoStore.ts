@@ -5,6 +5,7 @@ interface VideoStore {
   videoFile: VideoFile | null
   subtitleFile: SubtitleFile | null
   trimSettings: TrimSettings
+  brightness: number
   isProcessing: boolean
   processingProgress: ProcessingProgress | null
   error: string | null
@@ -13,6 +14,7 @@ interface VideoStore {
   setVideoFile: (file: VideoFile | null) => void
   setSubtitleFile: (file: SubtitleFile | null) => void
   setTrimSettings: (settings: Partial<TrimSettings>) => void
+  setBrightness: (value: number) => void
   setProcessing: (isProcessing: boolean) => void
   setProcessingProgress: (progress: ProcessingProgress | null) => void
   setError: (error: string | null) => void
@@ -24,6 +26,7 @@ export const useVideoStore = create<VideoStore>((set) => ({
   videoFile: null,
   subtitleFile: null,
   trimSettings: { startTime: 0, endTime: 0 },
+  brightness: 0,
   isProcessing: false,
   processingProgress: null,
   error: null,
@@ -35,6 +38,7 @@ export const useVideoStore = create<VideoStore>((set) => ({
     set((state) => ({
       trimSettings: { ...state.trimSettings, ...settings }
     })),
+  setBrightness: (value) => set({ brightness: value }),
   setProcessing: (isProcessing) => set({ isProcessing }),
   setProcessingProgress: (progress) => set({ processingProgress: progress }),
   setError: (error) => set({ error }),
@@ -44,6 +48,7 @@ export const useVideoStore = create<VideoStore>((set) => ({
       videoFile: null,
       subtitleFile: null,
       trimSettings: { startTime: 0, endTime: 0 },
+      brightness: 0,
       isProcessing: false,
       processingProgress: null,
       error: null,

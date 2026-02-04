@@ -4,7 +4,7 @@ import { tauriAPI } from '../lib/tauri-api'
 import { logger } from '../lib/logger'
 
 const VideoPreview: React.FC = () => {
-  const { videoFile } = useVideoStore()
+  const { videoFile, brightness, setBrightness } = useVideoStore()
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
 
   useEffect(() => {
@@ -39,6 +39,7 @@ const VideoPreview: React.FC = () => {
             className="w-full h-full"
             controls
             src={videoUrl}
+            style={{ filter: `brightness(${1 + brightness / 100})` }}
             onError={async (e) => {
               const target = e.target as HTMLVideoElement
               const errorDetails = {
@@ -69,6 +70,37 @@ const VideoPreview: React.FC = () => {
         <span>
           Duration: {Math.floor(videoFile.duration / 60)}:{Math.floor(videoFile.duration % 60).toString().padStart(2, '0')}
         </span>
+      </div>
+
+      <div className="mt-4 border-t pt-4">
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-sm font-medium text-gray-700">Brightness</label>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600">
+              {brightness > 0 ? `+${brightness}%` : `${brightness}%`}
+            </span>
+            <button
+              onClick={() => setBrightness(0)}
+              className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+        <input
+          type="range"
+          min="-100"
+          max="100"
+          step="5"
+          value={brightness}
+          onChange={(e) => setBrightness(Number(e.target.value))}
+          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-500"
+        />
+        <div className="flex justify-between text-xs text-gray-400 mt-1">
+          <span>-100%</span>
+          <span>0%</span>
+          <span>+100%</span>
+        </div>
       </div>
     </div>
   )

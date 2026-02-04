@@ -15,6 +15,7 @@ pub struct ProcessVideoParams {
     pub start_time: Option<f64>,
     pub end_time: Option<f64>,
     pub subtitle_file: Option<String>,
+    pub brightness: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -297,11 +298,27 @@ fn build_ffmpeg_args(params: &ProcessVideoParams) -> Result<Vec<String>, String>
         args.push(end.to_string());
     }
 
+    // Build video filter chain
+    let mut filters: Vec<String> = Vec::new();
+
+    // Add brightness filter if set
+    if let Some(brightness) = params.brightness {
+        // brightness is in range -1.0 to 1.0, 0 is neutral
+        if brightness.abs() > 0.001 {
+            filters.push(format!("eq=brightness={}", brightness));
+        }
+    }
+
+    // Add subtitles filter if provided
     if let Some(ref subtitle_file) = params.subtitle_file {
-        // Escape path for ffmpeg filter (handle Windows paths, drive-letter colons, and quotes).
         let escaped = escape_subtitle_path(subtitle_file);
+        filters.push(format!("subtitles=filename='{}'", escaped));
+    }
+
+    // Apply all filters as a chain
+    if !filters.is_empty() {
         args.push("-vf".to_string());
-        args.push(format!("subtitles=filename='{}'", escaped));
+        args.push(filters.join(","));
     }
 
     args.push("-c:v".to_string());

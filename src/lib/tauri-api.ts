@@ -9,6 +9,7 @@ export interface ProcessVideoParams {
   startTime?: number;
   endTime?: number;
   subtitleFile?: string;
+  brightness?: number;
 }
 
 export interface ProgressEvent {
