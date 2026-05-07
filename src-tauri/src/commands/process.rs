@@ -16,6 +16,10 @@ pub struct ProcessVideoParams {
     pub end_time: Option<f64>,
     pub subtitle_file: Option<String>,
     pub brightness: Option<f64>,
+    pub crop_width: Option<u32>,
+    pub crop_height: Option<u32>,
+    pub crop_x: Option<u32>,
+    pub crop_y: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,7 +125,7 @@ pub async fn process_video(
     Ok(job_id.to_string())
 }
 
-async fn monitor_ffmpeg_progress(
+pub async fn monitor_ffmpeg_progress(
     stderr: impl tokio::io::AsyncRead + Unpin,
     job_id: Uuid,
     duration: f64,
@@ -301,9 +305,13 @@ fn build_ffmpeg_args(params: &ProcessVideoParams) -> Result<Vec<String>, String>
     // Build video filter chain
     let mut filters: Vec<String> = Vec::new();
 
-    // Add brightness filter if set
+    if let (Some(w), Some(h)) = (params.crop_width, params.crop_height) {
+        let x = params.crop_x.unwrap_or(0);
+        let y = params.crop_y.unwrap_or(0);
+        filters.push(format!("crop={}:{}:{}:{}", w, h, x, y));
+    }
+
     if let Some(brightness) = params.brightness {
-        // brightness is in range -1.0 to 1.0, 0 is neutral
         if brightness.abs() > 0.001 {
             filters.push(format!("eq=brightness={}", brightness));
         }
@@ -410,12 +418,16 @@ mod tests {
     #[test]
     fn test_validate_inputs_with_nonexistent_input_file() {
         let params = ProcessVideoParams {
-            input_file: "/nonexistent/path.mp4".to_string(),
-            output_file: "/output/file.mp4".to_string(),
-            start_time: None,
-            end_time: None,
-            subtitle_file: None,
-        };
+                    input_file: "/nonexistent/path.mp4".to_string(),
+                    output_file: "/output/file.mp4".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: None,
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
 
         let result = validate_inputs(&params);
         assert!(result.is_err());
@@ -428,12 +440,16 @@ mod tests {
         writeln!(input, "test data").unwrap();
 
         let params = ProcessVideoParams {
-            input_file: input.path().to_str().unwrap().to_string(),
-            output_file: "/output/file.txt".to_string(),
-            start_time: None,
-            end_time: None,
-            subtitle_file: None,
-        };
+                    input_file: input.path().to_str().unwrap().to_string(),
+                    output_file: "/output/file.txt".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: None,
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
 
         let result = validate_inputs(&params);
         assert!(result.is_err());
@@ -449,12 +465,16 @@ mod tests {
 
         for ext in extensions {
             let params = ProcessVideoParams {
-                input_file: input.path().to_str().unwrap().to_string(),
-                output_file: format!("/output/file.{}", ext),
-                start_time: None,
-                end_time: None,
-                subtitle_file: None,
-            };
+                        input_file: input.path().to_str().unwrap().to_string(),
+                        output_file: format!("/output/file.{}", ext),
+                        start_time: None,
+                        end_time: None,
+                        subtitle_file: None,
+                        crop_width: None,
+                        crop_height: None,
+                        crop_x: None,
+                        crop_y: None,
+                    };
 
             assert!(validate_inputs(&params).is_ok());
         }
@@ -466,12 +486,16 @@ mod tests {
         writeln!(input, "test data").unwrap();
 
         let params = ProcessVideoParams {
-            input_file: input.path().to_str().unwrap().to_string(),
-            output_file: "/output/file.mp4".to_string(),
-            start_time: None,
-            end_time: None,
-            subtitle_file: Some("/nonexistent/subtitle.srt".to_string()),
-        };
+                    input_file: input.path().to_str().unwrap().to_string(),
+                    output_file: "/output/file.mp4".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: Some("/nonexistent/subtitle.srt".to_string()),
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
 
         let result = validate_inputs(&params);
         assert!(result.is_err());
@@ -481,12 +505,16 @@ mod tests {
     #[test]
     fn test_build_ffmpeg_args_basic() {
         let params = ProcessVideoParams {
-            input_file: "/input/video.mp4".to_string(),
-            output_file: "/output/video.mp4".to_string(),
-            start_time: None,
-            end_time: None,
-            subtitle_file: None,
-        };
+                    input_file: "/input/video.mp4".to_string(),
+                    output_file: "/output/video.mp4".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: None,
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
 
         let args = build_ffmpeg_args(&params).unwrap();
 
@@ -503,12 +531,16 @@ mod tests {
     #[test]
     fn test_build_ffmpeg_args_with_trim() {
         let params = ProcessVideoParams {
-            input_file: "/input/video.mp4".to_string(),
-            output_file: "/output/video.mp4".to_string(),
-            start_time: Some(10.5),
-            end_time: Some(60.0),
-            subtitle_file: None,
-        };
+                    input_file: "/input/video.mp4".to_string(),
+                    output_file: "/output/video.mp4".to_string(),
+                    start_time: Some(10.5),
+                    end_time: Some(60.0),
+                    subtitle_file: None,
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
 
         let args = build_ffmpeg_args(&params).unwrap();
 
@@ -522,12 +554,16 @@ mod tests {
     #[test]
     fn test_build_ffmpeg_args_with_windows_path_escaping() {
         let params = ProcessVideoParams {
-            input_file: "/input/video.mp4".to_string(),
-            output_file: "/output/video.mp4".to_string(),
-            start_time: None,
-            end_time: None,
-            subtitle_file: Some("C:\\Users\\Name\\subtitles.srt".to_string()),
-        };
+                    input_file: "/input/video.mp4".to_string(),
+                    output_file: "/output/video.mp4".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: Some("C:\\Users\\Name\\subtitles.srt".to_string()),
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
 
         let args = build_ffmpeg_args(&params).unwrap();
 
@@ -542,12 +578,16 @@ mod tests {
     #[test]
     fn test_build_ffmpeg_args_with_subtitles() {
         let params = ProcessVideoParams {
-            input_file: "/input/video.mp4".to_string(),
-            output_file: "/output/video.mp4".to_string(),
-            start_time: None,
-            end_time: None,
-            subtitle_file: Some("/path/to/subtitle.srt".to_string()),
-        };
+                    input_file: "/input/video.mp4".to_string(),
+                    output_file: "/output/video.mp4".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: Some("/path/to/subtitle.srt".to_string()),
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
 
         let args = build_ffmpeg_args(&params).unwrap();
 
@@ -560,12 +600,16 @@ mod tests {
     #[test]
     fn test_build_ffmpeg_args_with_spaces_and_quotes() {
         let params = ProcessVideoParams {
-            input_file: "/input/video.mp4".to_string(),
-            output_file: "/output/video.mp4".to_string(),
-            start_time: None,
-            end_time: None,
-            subtitle_file: Some("D:\\My Subs\\O'Connor\\show.srt".to_string()),
-        };
+                    input_file: "/input/video.mp4".to_string(),
+                    output_file: "/output/video.mp4".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: Some("D:\\My Subs\\O'Connor\\show.srt".to_string()),
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
 
         let args = build_ffmpeg_args(&params).unwrap();
 

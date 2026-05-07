@@ -18,6 +18,8 @@ pub fn run() {
             commands::process::cancel_process,
             commands::logging::write_frontend_log,
             commands::logging::get_log_file_path,
+            commands::merge::multi_cut_merge,
+            commands::merge::merge_videos,
         ])
         .setup(|app| {
             app.handle().plugin(

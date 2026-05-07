@@ -4,7 +4,7 @@ import { tauriAPI } from '../lib/tauri-api'
 import { logger } from '../lib/logger'
 
 const FileSelector: React.FC = () => {
-  const { videoFile, subtitleFile, setVideoFile, setSubtitleFile, setError, setTrimSettings } = useVideoStore()
+  const { mode, videoFile, subtitleFile, setVideoFile, setSubtitleFile, setError, setTrimSettings } = useVideoStore()
 
   const handleVideoSelect = async () => {
     try {
@@ -108,8 +108,9 @@ const FileSelector: React.FC = () => {
           )}
         </div>
 
-        <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
-          {subtitleFile ? (
+        {mode === 'trim' && (
+          <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
+            {subtitleFile ? (
             <div className="flex items-center justify-between">
               <div className="min-w-0">
                 <p className="font-medium text-gray-900 truncate">{subtitleFile.name}</p>
@@ -137,6 +138,7 @@ const FileSelector: React.FC = () => {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   )

@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import type { MultiCutMergeParams, MergeVideosParams } from '../types';
 
 export interface ProcessVideoParams {
   inputFile: string;
@@ -10,6 +11,10 @@ export interface ProcessVideoParams {
   endTime?: number;
   subtitleFile?: string;
   brightness?: number;
+  cropWidth?: number;
+  cropHeight?: number;
+  cropX?: number;
+  cropY?: number;
 }
 
 export interface ProgressEvent {
@@ -102,6 +107,11 @@ export const tauriAPI = {
         start_time: params.startTime,
         end_time: params.endTime,
         subtitle_file: params.subtitleFile,
+        brightness: params.brightness,
+        crop_width: params.cropWidth,
+        crop_height: params.cropHeight,
+        crop_x: params.cropX,
+        crop_y: params.cropY,
       },
     });
   },
@@ -141,5 +151,42 @@ export const tauriAPI = {
       const payload: any = event.payload;
       callback(normalizeJobId(payload) ?? '');
     });
+  },
+
+  multiCutMerge: async (params: MultiCutMergeParams): Promise<string> => {
+    return await invoke<string>('multi_cut_merge', {
+      params: {
+        input_file: params.inputFile,
+        output_file: params.outputFile,
+        segments: params.segments.map(s => ({ start_time: s.startTime, end_time: s.endTime })),
+        crop_width: params.cropWidth,
+        crop_height: params.cropHeight,
+        crop_x: params.cropX,
+        crop_y: params.cropY,
+      },
+    });
+  },
+
+  mergeVideos: async (params: MergeVideosParams): Promise<string> => {
+    return await invoke<string>('merge_videos', {
+      params: {
+        input_files: params.inputFiles,
+        output_file: params.outputFile,
+      },
+    });
+  },
+
+  selectMultipleVideoFiles: async (): Promise<string[] | null> => {
+    const selected = await open({
+      multiple: true,
+      filters: [
+        {
+          name: 'Video Files',
+          extensions: ['mp4', 'avi', 'mov', 'mkv', 'webm', 'flv'],
+        },
+      ],
+    });
+    if (!selected) return null;
+    return Array.isArray(selected) ? selected : [selected];
   },
 };

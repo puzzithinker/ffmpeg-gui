@@ -2,13 +2,18 @@ import React, { useState, useEffect } from 'react'
 import { useVideoStore } from '../store/useVideoStore'
 import { tauriAPI } from '../lib/tauri-api'
 import { logger } from '../lib/logger'
+import { formatTime } from '../utils/timeFormatting'
 
 const ProcessingPanel: React.FC = () => {
   const {
+    mode,
     videoFile,
     subtitleFile,
     trimSettings,
     brightness,
+    cropSettings,
+    segments,
+    mergeVideoFiles,
     isProcessing,
     processingProgress,
     setProcessing,
@@ -19,9 +24,44 @@ const ProcessingPanel: React.FC = () => {
   } = useVideoStore()
 
   const [outputPath, setOutputPath] = useState('')
-  const trimmedDuration = Math.max(0, trimSettings.endTime - trimSettings.startTime)
-  const statusLabel = isProcessing ? 'Processing' : videoFile ? 'Ready to export' : 'Awaiting video'
-  const statusStyle = isProcessing ? 'bg-primary-100 text-primary-700 border-primary-200' : videoFile ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'
+
+  const getCanProcess = () => {
+    if (isProcessing || !outputPath) return false
+    if (mode === 'trim') return !!videoFile
+    if (mode === 'multi-cut') return !!videoFile && segments.length > 0
+    if (mode === 'merge') return mergeVideoFiles.length >= 2
+    return false
+  }
+
+  const getStatusLabel = () => {
+    if (isProcessing) return 'Processing'
+    if (mode === 'trim') return videoFile ? 'Ready to export' : 'Awaiting video'
+    if (mode === 'multi-cut') return (videoFile && segments.length > 0) ? 'Ready to export' : 'Awaiting video & segments'
+    if (mode === 'merge') return mergeVideoFiles.length >= 2 ? 'Ready to export' : 'Awaiting 2+ videos'
+    return 'Awaiting input'
+  }
+
+  const getStatusStyle = () => {
+    if (isProcessing) return 'bg-primary-100 text-primary-700 border-primary-200'
+    if (getCanProcess()) return 'bg-green-100 text-green-700 border-green-200'
+    return 'bg-gray-100 text-gray-600 border-gray-200'
+  }
+
+  const getDurationLabel = () => {
+    if (mode === 'trim' && videoFile) {
+      const dur = Math.max(0, trimSettings.endTime - trimSettings.startTime)
+      return formatTime(dur)
+    }
+    if (mode === 'multi-cut' && videoFile && segments.length > 0) {
+      const total = segments.reduce((sum, s) => sum + (s.endTime - s.startTime), 0)
+      return formatTime(total)
+    }
+    if (mode === 'merge' && mergeVideoFiles.length > 0) {
+      const total = mergeVideoFiles.reduce((sum, f) => sum + f.duration, 0)
+      return formatTime(total)
+    }
+    return '0:00'
+  }
 
   useEffect(() => {
     let unlistenProgress: (() => void) | null = null
@@ -33,77 +73,53 @@ const ProcessingPanel: React.FC = () => {
       unlistenProgress = await tauriAPI.onFFmpegProgress((event) => {
         const state = useVideoStore.getState()
         const effectiveJobId = event.jobId || state.currentJobId
-        void logger.log(`[ProcessingPanel] Progress event payload: jobId=${event.jobId}, seconds=${event.seconds}, percent=${event.percent}, stateJob=${state.currentJobId}, effectiveJob=${effectiveJobId}`)
+        void logger.log(`[ProcessingPanel] Progress event: jobId=${event.jobId}, percent=${event.percent}`)
 
-        if (!effectiveJobId) {
-          void logger.log('[ProcessingPanel] Dropping progress event because no job id is available')
-          return
-        }
+        if (!effectiveJobId) return
 
         if (!state.currentJobId) {
           state.setCurrentJobId(effectiveJobId)
-        } else if (state.currentJobId !== effectiveJobId) {
-          void logger.log(`[ProcessingPanel] Progress jobId mismatch (expected ${state.currentJobId}, got ${effectiveJobId}) — applying anyway`)
         }
 
         state.setProcessingProgress({
           currentTime: event.seconds,
           percentage: event.percent,
         })
-        void logger.log(`[ProcessingPanel] Progress applied for jobId=${effectiveJobId}: ${event.percent.toFixed(2)}% at ${event.seconds}s`)
       })
 
       unlistenComplete = await tauriAPI.onFFmpegComplete((jobId) => {
         const state = useVideoStore.getState()
         const effectiveJobId = jobId || state.currentJobId
-        void logger.log(`[ProcessingPanel] Complete event payload: jobId=${jobId}, stateJob=${state.currentJobId}, effectiveJob=${effectiveJobId}`)
+        if (!effectiveJobId) return
 
-        if (!effectiveJobId) {
-          void logger.log('[ProcessingPanel] Dropping complete event because no job id is available')
-          return
-        }
-
-        state.setProcessingProgress({ currentTime: state.trimSettings.endTime - state.trimSettings.startTime, percentage: 100 })
+        state.setProcessingProgress({ currentTime: 0, percentage: 100 })
         setTimeout(() => {
           state.setProcessing(false)
           state.setProcessingProgress(null)
           state.setCurrentJobId(null)
         }, 1000)
-        void logger.log(`[ProcessingPanel] Processing complete for jobId=${effectiveJobId}`)
       })
 
       unlistenError = await tauriAPI.onFFmpegError((jobId, error) => {
         const state = useVideoStore.getState()
         const effectiveJobId = jobId || state.currentJobId
-        void logger.log(`[ProcessingPanel] Error event payload: jobId=${jobId}, stateJob=${state.currentJobId}, effectiveJob=${effectiveJobId}, error=${error}`)
-
-        if (!effectiveJobId) {
-          void logger.log('[ProcessingPanel] Dropping error event because no job id is available')
-          return
-        }
+        if (!effectiveJobId) return
 
         state.setError(`Processing failed: ${error}`)
         state.setProcessing(false)
         state.setProcessingProgress(null)
         state.setCurrentJobId(null)
-        void logger.error(`[ProcessingPanel] Processing failed for jobId=${effectiveJobId}`, error)
       })
 
       unlistenCancelled = await tauriAPI.onFFmpegCancelled((jobId) => {
         const state = useVideoStore.getState()
         const effectiveJobId = jobId || state.currentJobId
-        void logger.log(`[ProcessingPanel] Cancelled event payload: jobId=${jobId}, stateJob=${state.currentJobId}, effectiveJob=${effectiveJobId}`)
-
-        if (!effectiveJobId) {
-          void logger.log('[ProcessingPanel] Dropping cancelled event because no job id is available')
-          return
-        }
+        if (!effectiveJobId) return
 
         state.setError('Processing cancelled')
         state.setProcessing(false)
         state.setProcessingProgress(null)
         state.setCurrentJobId(null)
-        void logger.log(`[ProcessingPanel] Processing cancelled for jobId=${effectiveJobId}`)
       })
     }
 
@@ -122,7 +138,6 @@ const ProcessingPanel: React.FC = () => {
       const filePath = await tauriAPI.selectOutputFile()
       if (filePath) {
         setOutputPath(filePath)
-        await logger.log(`[ProcessingPanel] Selected output file: ${filePath}`)
       }
     } catch (error) {
       setError(`Failed to select output file: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -130,32 +145,69 @@ const ProcessingPanel: React.FC = () => {
   }
 
   const handleProcess = async () => {
-    if (!videoFile || !outputPath) {
-      setError('Please select both input video and output file')
+    if (!outputPath) {
+      setError('Please select an output file')
       return
     }
 
     try {
-      await logger.log(`[ProcessingPanel] Starting processing: input=${videoFile.path}, output=${outputPath}, trim=${trimSettings.startTime}-${trimSettings.endTime}, subtitle=${subtitleFile?.path ?? 'none'}`)
       setProcessing(true)
       setProcessingProgress({ currentTime: 0, percentage: 0 })
       setError(null)
 
-      const jobId = await tauriAPI.processVideo({
-        inputFile: videoFile.path,
-        outputFile: outputPath,
-        startTime: trimSettings.startTime,
-        endTime: trimSettings.endTime,
-        subtitleFile: subtitleFile?.path,
-      })
+      let jobId: string
+
+      if (mode === 'trim') {
+        if (!videoFile) {
+          setError('Please select a video file')
+          setProcessing(false)
+          return
+        }
+        jobId = await tauriAPI.processVideo({
+          inputFile: videoFile.path,
+          outputFile: outputPath,
+          startTime: trimSettings.startTime,
+          endTime: trimSettings.endTime,
+          subtitleFile: subtitleFile?.path,
+          brightness: brightness !== 0 ? brightness : undefined,
+          cropWidth: cropSettings.enabled ? cropSettings.width : undefined,
+          cropHeight: cropSettings.enabled ? cropSettings.height : undefined,
+          cropX: cropSettings.enabled ? cropSettings.x : undefined,
+          cropY: cropSettings.enabled ? cropSettings.y : undefined,
+        })
+      } else if (mode === 'multi-cut') {
+        if (!videoFile || segments.length === 0) {
+          setError('Please select a video and add segments')
+          setProcessing(false)
+          return
+        }
+        jobId = await tauriAPI.multiCutMerge({
+          inputFile: videoFile.path,
+          outputFile: outputPath,
+          segments: segments.map(s => ({ startTime: s.startTime, endTime: s.endTime })),
+          cropWidth: cropSettings.enabled ? cropSettings.width : undefined,
+          cropHeight: cropSettings.enabled ? cropSettings.height : undefined,
+          cropX: cropSettings.enabled ? cropSettings.x : undefined,
+          cropY: cropSettings.enabled ? cropSettings.y : undefined,
+        })
+      } else {
+        if (mergeVideoFiles.length < 2) {
+          setError('Please select at least 2 videos to merge')
+          setProcessing(false)
+          return
+        }
+        jobId = await tauriAPI.mergeVideos({
+          inputFiles: mergeVideoFiles.map(f => f.path),
+          outputFile: outputPath,
+        })
+      }
 
       setCurrentJobId(jobId)
-      await logger.log(`[ProcessingPanel] Processing started with jobId=${jobId}`)
+      void logger.log(`[ProcessingPanel] Processing started with jobId=${jobId}`)
     } catch (error) {
       setError(`Failed to start processing: ${error instanceof Error ? error.message : 'Unknown error'}`)
       setProcessing(false)
       setProcessingProgress(null)
-      await logger.error('[ProcessingPanel] Failed to start processing', error)
     }
   }
 
@@ -169,14 +221,14 @@ const ProcessingPanel: React.FC = () => {
     }
   }
 
-  const canProcess = videoFile && outputPath && !isProcessing
+  const canProcess = getCanProcess()
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold">Export</h2>
-        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${statusStyle}`}>
-          {statusLabel}
+        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getStatusStyle()}`}>
+          {getStatusLabel()}
         </span>
       </div>
 
@@ -209,43 +261,65 @@ const ProcessingPanel: React.FC = () => {
           )}
         </div>
 
-        {videoFile && (
-          <div className="bg-gray-50 p-3 rounded-md">
-            <h3 className="font-medium text-gray-900 mb-2">Summary</h3>
-            <div className="grid grid-cols-2 gap-3 text-sm text-gray-700">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-500">Input</p>
-                <p className="font-medium truncate">{videoFile.name}</p>
-                <p className="text-xs text-gray-500 break-all">{videoFile.path}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-500">Duration</p>
-                <p className="font-medium">
-                  {Math.floor(trimmedDuration / 60)}:
-                  {Math.floor(trimmedDuration % 60).toString().padStart(2, '0')}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-500">Output</p>
-                <p className="font-medium truncate">{outputPath ? outputPath.split(/[/\\]/).pop() : 'Not selected'}</p>
-                {outputPath && <p className="text-xs text-gray-500 break-all">{outputPath}</p>}
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-500">Subtitles</p>
-                <p className="font-medium">{subtitleFile ? subtitleFile.name : 'None'}</p>
-                {subtitleFile && <p className="text-xs text-gray-500 break-all">{subtitleFile.path}</p>}
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-500">Brightness</p>
-                <p className="font-medium">{brightness > 0 ? `+${brightness}%` : `${brightness}%`}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-500">Brightness</p>
-                <p className="font-medium">{brightness > 0 ? '+' : ''}{brightness}%</p>
-              </div>
+        <div className="bg-gray-50 p-3 rounded-md">
+          <h3 className="font-medium text-gray-900 mb-2">Summary</h3>
+          <div className="grid grid-cols-2 gap-3 text-sm text-gray-700">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-gray-500">Mode</p>
+              <p className="font-medium">{mode === 'trim' ? 'Trim' : mode === 'multi-cut' ? 'Multi-Cut & Merge' : 'Merge Videos'}</p>
             </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-gray-500">Output Duration</p>
+              <p className="font-medium">{getDurationLabel()}</p>
+            </div>
+            {mode === 'trim' && videoFile && (
+              <>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Input</p>
+                  <p className="font-medium truncate">{videoFile.name}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Subtitles</p>
+                  <p className="font-medium">{subtitleFile ? subtitleFile.name : 'None'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Brightness</p>
+                  <p className="font-medium">{brightness > 0 ? '+' : ''}{brightness}%</p>
+                </div>
+                {cropSettings.enabled && (
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-gray-500">Crop</p>
+                    <p className="font-medium">{cropSettings.width}×{cropSettings.height}+{cropSettings.x}+{cropSettings.y}</p>
+                  </div>
+                )}
+              </>
+            )}
+            {mode === 'multi-cut' && videoFile && (
+              <>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Input</p>
+                  <p className="font-medium truncate">{videoFile.name}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Segments</p>
+                  <p className="font-medium">{segments.length} segment{segments.length !== 1 ? 's' : ''}</p>
+                </div>
+                {cropSettings.enabled && (
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-gray-500">Crop</p>
+                    <p className="font-medium">{cropSettings.width}×{cropSettings.height}+{cropSettings.x}+{cropSettings.y}</p>
+                  </div>
+                )}
+              </>
+            )}
+            {mode === 'merge' && (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">Videos</p>
+                <p className="font-medium">{mergeVideoFiles.length} file{mergeVideoFiles.length !== 1 ? 's' : ''}</p>
+              </div>
+            )}
           </div>
-        )}
+        </div>
 
         {isProcessing && processingProgress && (
           <div className="space-y-3 bg-primary-50 border border-primary-100 rounded-md p-3">
@@ -267,7 +341,7 @@ const ProcessingPanel: React.FC = () => {
             </div>
             <div className="flex justify-between text-xs text-primary-800">
               <span>{processingProgress.currentTime.toFixed(1)}s processed</span>
-              <span>{trimmedDuration ? Math.min(100, processingProgress.percentage).toFixed(1) : '0.0'}% of trim</span>
+              <span>{Math.min(100, processingProgress.percentage).toFixed(1)}%</span>
             </div>
           </div>
         )}

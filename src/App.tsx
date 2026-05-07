@@ -172,7 +172,7 @@ function App() {
             FFmpeg GUI
           </h1>
           <p className="text-gray-600 text-center mt-2">
-            Trim videos and burn subtitles with ease
+            Trim, cut, merge videos and burn subtitles with ease
           </p>
         </header>
         <VideoProcessor />
