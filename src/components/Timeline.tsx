@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react'
 import { useVideoStore } from '../store/useVideoStore'
 import { formatTime } from '../utils/timeFormatting'
+import TimestampInput from './TimestampInput'
 
 const Timeline: React.FC = () => {
   const { videoFile, trimSettings, setTrimSettings } = useVideoStore()
@@ -38,40 +39,30 @@ const Timeline: React.FC = () => {
       <h2 className="text-xl font-semibold mb-4">Trim Timeline</h2>
       
       <div className="space-y-4">
-        <div className="flex justify-between items-center text-sm">
-          <div>
-            <label className="block text-gray-600">Start Time</label>
-            <input
-              type="number"
-              min="0"
-              max={videoFile.duration}
-              step="0.1"
-              value={trimSettings.startTime.toFixed(1)}
-              onChange={(e) => setTrimSettings({ startTime: Math.max(0, Math.min(parseFloat(e.target.value), trimSettings.endTime - 1)) })}
-              className="mt-1 block w-20 px-2 py-1 border border-gray-300 rounded-md text-sm"
-            />
-            <span className="text-gray-500">{formatTime(trimSettings.startTime)}</span>
-          </div>
+        <div className="flex justify-between items-start text-sm">
+          <TimestampInput
+            label="Start Time"
+            value={trimSettings.startTime}
+            onChange={(v) => setTrimSettings({ startTime: Math.min(v, trimSettings.endTime - 1) })}
+            min={0}
+            max={trimSettings.endTime - 1}
+            step={1}
+          />
           
-          <div className="text-center">
+          <div className="text-center pt-5">
             <span className="text-lg font-medium">
               {formatTime(trimSettings.endTime - trimSettings.startTime)} selected
             </span>
           </div>
           
-          <div>
-            <label className="block text-gray-600">End Time</label>
-            <input
-              type="number"
-              min="0"
-              max={videoFile.duration}
-              step="0.1"
-              value={trimSettings.endTime.toFixed(1)}
-              onChange={(e) => setTrimSettings({ endTime: Math.min(videoFile.duration, Math.max(parseFloat(e.target.value), trimSettings.startTime + 1)) })}
-              className="mt-1 block w-20 px-2 py-1 border border-gray-300 rounded-md text-sm"
-            />
-            <span className="text-gray-500">{formatTime(trimSettings.endTime)}</span>
-          </div>
+          <TimestampInput
+            label="End Time"
+            value={trimSettings.endTime}
+            onChange={(v) => setTrimSettings({ endTime: Math.max(v, trimSettings.startTime + 1) })}
+            min={trimSettings.startTime + 1}
+            max={videoFile.duration}
+            step={1}
+          />
         </div>
 
         <div 

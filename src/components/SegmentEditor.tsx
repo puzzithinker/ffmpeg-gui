@@ -1,6 +1,7 @@
 import React from 'react'
 import { useVideoStore } from '../store/useVideoStore'
 import { formatTime } from '../utils/timeFormatting'
+import TimestampInput from './TimestampInput'
 
 const SegmentEditor: React.FC = () => {
   const { videoFile, segments, addSegment, updateSegment, removeSegment } = useVideoStore()
@@ -36,47 +37,23 @@ const SegmentEditor: React.FC = () => {
               <span className="text-sm font-medium text-gray-500 w-6">#{index + 1}</span>
 
               <div className="flex-1 grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Start</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={videoFile.duration}
-                    step={0.1}
-                    value={seg.startTime.toFixed(1)}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value)
-                      if (!isNaN(val)) {
-                        updateSegment(seg.id, {
-                          startTime: Math.max(0, Math.min(val, seg.endTime - 0.1)),
-                        })
-                      }
-                    }}
-                    className="block w-full px-2 py-1 border border-gray-300 rounded-md text-sm"
-                  />
-                  <span className="text-xs text-gray-400">{formatTime(seg.startTime)}</span>
-                </div>
+                <TimestampInput
+                  label="Start"
+                  value={seg.startTime}
+                  onChange={(v) => updateSegment(seg.id, { startTime: Math.min(v, seg.endTime - 0.1) })}
+                  min={0}
+                  max={seg.endTime - 0.1}
+                  step={1}
+                />
 
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">End</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={videoFile.duration}
-                    step={0.1}
-                    value={seg.endTime.toFixed(1)}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value)
-                      if (!isNaN(val)) {
-                        updateSegment(seg.id, {
-                          endTime: Math.max(seg.startTime + 0.1, Math.min(val, videoFile.duration)),
-                        })
-                      }
-                    }}
-                    className="block w-full px-2 py-1 border border-gray-300 rounded-md text-sm"
-                  />
-                  <span className="text-xs text-gray-400">{formatTime(seg.endTime)}</span>
-                </div>
+                <TimestampInput
+                  label="End"
+                  value={seg.endTime}
+                  onChange={(v) => updateSegment(seg.id, { endTime: Math.max(v, seg.startTime + 0.1) })}
+                  min={seg.startTime + 0.1}
+                  max={videoFile.duration}
+                  step={1}
+                />
               </div>
 
               <div className="text-right">
