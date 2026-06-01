@@ -12,6 +12,7 @@ const ProcessingPanel: React.FC = () => {
     trimSettings,
     brightness,
     cropSettings,
+    subtitleSettings,
     segments,
     mergeVideoFiles,
     isProcessing,
@@ -169,6 +170,8 @@ const ProcessingPanel: React.FC = () => {
           startTime: trimSettings.startTime,
           endTime: trimSettings.endTime,
           subtitleFile: subtitleFile?.path,
+          subtitleFont: subtitleFile && subtitleSettings.font ? subtitleSettings.font : undefined,
+          subtitleFontSize: subtitleFile ? subtitleSettings.fontSize : undefined,
           brightness: brightness !== 0 ? brightness : undefined,
           cropWidth: cropSettings.enabled ? cropSettings.width : undefined,
           cropHeight: cropSettings.enabled ? cropSettings.height : undefined,
@@ -282,6 +285,12 @@ const ProcessingPanel: React.FC = () => {
                   <p className="text-xs uppercase tracking-wide text-gray-500">Subtitles</p>
                   <p className="font-medium">{subtitleFile ? subtitleFile.name : 'None'}</p>
                 </div>
+                {subtitleFile && (subtitleSettings.font || subtitleSettings.fontSize !== 24) && (
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-gray-500">Subtitle Style</p>
+                    <p className="font-medium">{subtitleSettings.font || 'Default font'}{subtitleSettings.fontSize !== 24 ? `, ${subtitleSettings.fontSize}px` : ''}</p>
+                  </div>
+                )}
                 <div>
                   <p className="text-xs uppercase tracking-wide text-gray-500">Brightness</p>
                   <p className="font-medium">{brightness > 0 ? '+' : ''}{brightness}%</p>

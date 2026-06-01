@@ -9,9 +9,10 @@ import ModeSelector from './ModeSelector'
 import SegmentEditor from './SegmentEditor'
 import MergeFileList from './MergeFileList'
 import CropSettings from './CropSettings'
+import SubtitleSettings from './SubtitleSettings'
 
 const VideoProcessor: React.FC = () => {
-  const { videoFile, mode, error } = useVideoStore()
+  const { videoFile, subtitleFile, mode, error } = useVideoStore()
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -27,6 +28,7 @@ const VideoProcessor: React.FC = () => {
               {videoFile && <VideoPreview />}
               {videoFile && <Timeline />}
               {videoFile && <CropSettings />}
+              {subtitleFile && <SubtitleSettings />}
             </>
           )}
 
