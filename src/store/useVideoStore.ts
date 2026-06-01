@@ -49,10 +49,9 @@ export const useVideoStore = create<VideoStore>((set) => ({
   currentJobId: null,
   mode: 'trim',
   segments: [],
-      mergeVideoFiles: [],
-      cropSettings: { enabled: false, width: 1920, height: 1080, x: 0, y: 0 },
-      subtitleSettings: { font: '', fontSize: 24 },
-    }),
+  mergeVideoFiles: [],
+  cropSettings: { enabled: false, width: 1920, height: 1080, x: 0, y: 0 },
+  subtitleSettings: { font: '', fontSize: 24 },
   setMode: (mode) => set({ mode }),
   addSegment: () => set((state) => {
     const videoFile = state.videoFile
