@@ -10,6 +10,8 @@ export interface ProcessVideoParams {
   startTime?: number;
   endTime?: number;
   subtitleFile?: string;
+  subtitleFont?: string;
+  subtitleFontSize?: number;
   brightness?: number;
   cropWidth?: number;
   cropHeight?: number;
@@ -107,6 +109,8 @@ export const tauriAPI = {
         start_time: params.startTime,
         end_time: params.endTime,
         subtitle_file: params.subtitleFile,
+        subtitle_font: params.subtitleFont,
+        subtitle_font_size: params.subtitleFontSize,
         brightness: params.brightness,
         crop_width: params.cropWidth,
         crop_height: params.cropHeight,

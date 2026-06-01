@@ -48,6 +48,11 @@ export interface CropSettings {
   y: number
 }
 
+export interface SubtitleSettings {
+  font: string
+  fontSize: number
+}
+
 export interface MultiCutMergeParams {
   inputFile: string
   outputFile: string

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { VideoFile, SubtitleFile, TrimSettings, ProcessingProgress, AppMode, VideoSegment, CropSettings } from '../types'
+import { VideoFile, SubtitleFile, TrimSettings, ProcessingProgress, AppMode, VideoSegment, CropSettings, SubtitleSettings } from '../types'
 
 interface VideoStore {
   videoFile: VideoFile | null
@@ -14,6 +14,7 @@ interface VideoStore {
   segments: VideoSegment[]
   mergeVideoFiles: VideoFile[]
   cropSettings: CropSettings
+  subtitleSettings: SubtitleSettings
 
   setVideoFile: (file: VideoFile | null) => void
   setSubtitleFile: (file: SubtitleFile | null) => void
@@ -34,6 +35,7 @@ interface VideoStore {
   reorderMergeVideos: (fromIndex: number, toIndex: number) => void
   clearMergeVideos: () => void
   setCropSettings: (settings: Partial<CropSettings>) => void
+  setSubtitleSettings: (settings: Partial<SubtitleSettings>) => void
 }
 
 export const useVideoStore = create<VideoStore>((set) => ({
@@ -47,34 +49,9 @@ export const useVideoStore = create<VideoStore>((set) => ({
   currentJobId: null,
   mode: 'trim',
   segments: [],
-  mergeVideoFiles: [],
-  cropSettings: { enabled: false, width: 1920, height: 1080, x: 0, y: 0 },
-
-  setVideoFile: (file) => set({ videoFile: file }),
-  setSubtitleFile: (file) => set({ subtitleFile: file }),
-  setTrimSettings: (settings) =>
-    set((state) => ({
-      trimSettings: { ...state.trimSettings, ...settings }
-    })),
-  setBrightness: (value) => set({ brightness: value }),
-  setProcessing: (isProcessing) => set({ isProcessing }),
-  setProcessingProgress: (progress) => set({ processingProgress: progress }),
-  setError: (error) => set({ error }),
-  setCurrentJobId: (jobId) => set({ currentJobId: jobId }),
-  reset: () =>
-    set({
-      videoFile: null,
-      subtitleFile: null,
-      trimSettings: { startTime: 0, endTime: 0 },
-      brightness: 0,
-      isProcessing: false,
-      processingProgress: null,
-      error: null,
-      currentJobId: null,
-      mode: 'trim',
-      segments: [],
       mergeVideoFiles: [],
       cropSettings: { enabled: false, width: 1920, height: 1080, x: 0, y: 0 },
+      subtitleSettings: { font: '', fontSize: 24 },
     }),
   setMode: (mode) => set({ mode }),
   addSegment: () => set((state) => {
@@ -109,5 +86,8 @@ export const useVideoStore = create<VideoStore>((set) => ({
   clearMergeVideos: () => set({ mergeVideoFiles: [] }),
   setCropSettings: (settings) => set((state) => ({
     cropSettings: { ...state.cropSettings, ...settings },
+  })),
+  setSubtitleSettings: (settings) => set((state) => ({
+    subtitleSettings: { ...state.subtitleSettings, ...settings },
   })),
 }))
