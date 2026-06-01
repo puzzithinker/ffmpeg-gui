@@ -15,6 +15,11 @@
 - TypeScript with strict settings; prefer functional `.tsx` components, PascalCase components, `use*` hooks, and 2-space indentation. Use the Zustand store for shared state instead of deep props.
 - Import via the `@/` alias; avoid Node APIs in the renderer—route file/process work through the preload IPC surface. Styling favors Tailwind utilities with the configured `primary` palette; extend via config rather than inline styles.
 
+## Zustand Store Pitfalls
+- **Premature closure is a silent killer.** A `})` that closes the `create()` call too early makes every property after it unreachable at runtime — TypeScript won't warn you because the orphaned code is syntactically valid. When adding new state properties to `useVideoStore.ts`, always verify that the closing `}))` is at the *end* of the store definition and that all interface methods have implementations inside the `create()` callback.
+- **Missing setters = invisible breakage.** A `setVideoFile` that's `undefined` doesn't throw; it silently eats the call, making UI updates impossible. After editing the store, do a quick diff of the interface vs. the implementation to confirm every method is present.
+- Keep store property initial values, their setters, and (if applicable) `reset()` entries grouped together so missing members are obvious at a glance.
+
 ## Testing Guidelines
 - No automated suite; run lint + type-check and manually cover video selection, subtitle attachment, trimming, progress events, and output creation.
 - If you add tests, colocate them with source files and stub IPC/child_process work; document any new commands added to `package.json`.
