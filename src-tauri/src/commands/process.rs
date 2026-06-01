@@ -15,6 +15,8 @@ pub struct ProcessVideoParams {
     pub start_time: Option<f64>,
     pub end_time: Option<f64>,
     pub subtitle_file: Option<String>,
+    pub subtitle_font: Option<String>,
+    pub subtitle_font_size: Option<u32>,
     pub brightness: Option<f64>,
     pub crop_width: Option<u32>,
     pub crop_height: Option<u32>,
@@ -320,7 +322,25 @@ fn build_ffmpeg_args(params: &ProcessVideoParams) -> Result<Vec<String>, String>
     // Add subtitles filter if provided
     if let Some(ref subtitle_file) = params.subtitle_file {
         let escaped = escape_subtitle_path(subtitle_file);
-        filters.push(format!("subtitles=filename='{}'", escaped));
+        let mut sub_filter = format!("subtitles=filename='{}'", escaped);
+
+        // Build force_style if font or font_size is specified
+        let mut style_parts: Vec<String> = Vec::new();
+        if let Some(ref font) = params.subtitle_font {
+            if !font.is_empty() {
+                style_parts.push(format!("FontName={}", font));
+            }
+        }
+        if let Some(font_size) = params.subtitle_font_size {
+            if font_size > 0 {
+                style_parts.push(format!("FontSize={}", font_size));
+            }
+        }
+        if !style_parts.is_empty() {
+            sub_filter.push_str(&format!(":force_style='{}'", style_parts.join(",")));
+        }
+
+        filters.push(sub_filter);
     }
 
     // Apply all filters as a chain
@@ -423,6 +443,9 @@ mod tests {
                     start_time: None,
                     end_time: None,
                     subtitle_file: None,
+                    subtitle_font: None,
+                    subtitle_font_size: None,
+                    brightness: None,
                     crop_width: None,
                     crop_height: None,
                     crop_x: None,
@@ -445,6 +468,9 @@ mod tests {
                     start_time: None,
                     end_time: None,
                     subtitle_file: None,
+                    subtitle_font: None,
+                    subtitle_font_size: None,
+                    brightness: None,
                     crop_width: None,
                     crop_height: None,
                     crop_x: None,
@@ -470,6 +496,9 @@ mod tests {
                         start_time: None,
                         end_time: None,
                         subtitle_file: None,
+                        subtitle_font: None,
+                        subtitle_font_size: None,
+                        brightness: None,
                         crop_width: None,
                         crop_height: None,
                         crop_x: None,
@@ -491,6 +520,9 @@ mod tests {
                     start_time: None,
                     end_time: None,
                     subtitle_file: Some("/nonexistent/subtitle.srt".to_string()),
+                    subtitle_font: None,
+                    subtitle_font_size: None,
+                    brightness: None,
                     crop_width: None,
                     crop_height: None,
                     crop_x: None,
@@ -510,6 +542,9 @@ mod tests {
                     start_time: None,
                     end_time: None,
                     subtitle_file: None,
+                    subtitle_font: None,
+                    subtitle_font_size: None,
+                    brightness: None,
                     crop_width: None,
                     crop_height: None,
                     crop_x: None,
@@ -536,6 +571,9 @@ mod tests {
                     start_time: Some(10.5),
                     end_time: Some(60.0),
                     subtitle_file: None,
+                    subtitle_font: None,
+                    subtitle_font_size: None,
+                    brightness: None,
                     crop_width: None,
                     crop_height: None,
                     crop_x: None,
@@ -559,6 +597,9 @@ mod tests {
                     start_time: None,
                     end_time: None,
                     subtitle_file: Some("C:\\Users\\Name\\subtitles.srt".to_string()),
+                    subtitle_font: None,
+                    subtitle_font_size: None,
+                    brightness: None,
                     crop_width: None,
                     crop_height: None,
                     crop_x: None,
@@ -583,6 +624,9 @@ mod tests {
                     start_time: None,
                     end_time: None,
                     subtitle_file: Some("/path/to/subtitle.srt".to_string()),
+                    subtitle_font: None,
+                    subtitle_font_size: None,
+                    brightness: None,
                     crop_width: None,
                     crop_height: None,
                     crop_x: None,
@@ -605,6 +649,9 @@ mod tests {
                     start_time: None,
                     end_time: None,
                     subtitle_file: Some("D:\\My Subs\\O'Connor\\show.srt".to_string()),
+                    subtitle_font: None,
+                    subtitle_font_size: None,
+                    brightness: None,
                     crop_width: None,
                     crop_height: None,
                     crop_x: None,
@@ -619,5 +666,105 @@ mod tests {
             filter,
             "subtitles=filename='D\\:/My Subs/O\\'Connor/show.srt'"
         );
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_with_subtitle_force_style() {
+        let params = ProcessVideoParams {
+                    input_file: "/input/video.mp4".to_string(),
+                    output_file: "/output/video.mp4".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: Some("/path/to/sub.srt".to_string()),
+                    subtitle_font: Some("Arial".to_string()),
+                    subtitle_font_size: Some(36),
+                    brightness: None,
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        let vf_idx = args.iter().position(|x| x == "-vf").unwrap();
+        let filter = &args[vf_idx + 1];
+        assert!(filter.contains("subtitles=filename='/path/to/sub.srt'"));
+        assert!(filter.contains(":force_style='FontName=Arial,FontSize=36'"));
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_with_subtitle_font_only() {
+        let params = ProcessVideoParams {
+                    input_file: "/input/video.mp4".to_string(),
+                    output_file: "/output/video.mp4".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: Some("/path/to/sub.srt".to_string()),
+                    subtitle_font: Some("DejaVu Sans".to_string()),
+                    subtitle_font_size: None,
+                    brightness: None,
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        let vf_idx = args.iter().position(|x| x == "-vf").unwrap();
+        let filter = &args[vf_idx + 1];
+        assert!(filter.contains("force_style='FontName=DejaVu Sans'"));
+        assert!(!filter.contains("FontSize"));
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_with_subtitle_font_size_only() {
+        let params = ProcessVideoParams {
+                    input_file: "/input/video.mp4".to_string(),
+                    output_file: "/output/video.mp4".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: Some("/path/to/sub.srt".to_string()),
+                    subtitle_font: None,
+                    subtitle_font_size: Some(48),
+                    brightness: None,
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        let vf_idx = args.iter().position(|x| x == "-vf").unwrap();
+        let filter = &args[vf_idx + 1];
+        assert!(filter.contains("force_style='FontSize=48'"));
+        assert!(!filter.contains("FontName"));
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_with_empty_font_name_ignored() {
+        let params = ProcessVideoParams {
+                    input_file: "/input/video.mp4".to_string(),
+                    output_file: "/output/video.mp4".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: Some("/path/to/sub.srt".to_string()),
+                    subtitle_font: Some("".to_string()),
+                    subtitle_font_size: Some(24),
+                    brightness: None,
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        let vf_idx = args.iter().position(|x| x == "-vf").unwrap();
+        let filter = &args[vf_idx + 1];
+        assert!(filter.contains("force_style='FontSize=24'"));
+        assert!(!filter.contains("FontName="));
     }
 }
