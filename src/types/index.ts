@@ -67,3 +67,21 @@ export interface MergeVideosParams {
   inputFiles: string[]
   outputFile: string
 }
+
+export interface SubtitleEntry {
+  id: string
+  index: number
+  startTimeMs: number
+  endTimeMs: number
+  text: string
+  bilingualText: string
+}
+
+export interface SubtitleEditState {
+  entries: SubtitleEntry[]
+  isDirty: boolean
+  isBilingual: boolean
+  primaryLanguage: string
+  secondaryLanguage: string
+  editedFilePath: string | null
+}

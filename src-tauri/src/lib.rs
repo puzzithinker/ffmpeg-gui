@@ -20,6 +20,9 @@ pub fn run() {
             commands::logging::get_log_file_path,
             commands::merge::multi_cut_merge,
             commands::merge::merge_videos,
+            commands::subtitle::read_subtitle_file,
+            commands::subtitle::write_subtitle_file,
+            commands::subtitle::write_temp_subtitle,
         ])
         .setup(|app| {
             app.handle().plugin(

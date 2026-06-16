@@ -1,5 +1,14 @@
 import { create } from 'zustand'
-import { VideoFile, SubtitleFile, TrimSettings, ProcessingProgress, AppMode, VideoSegment, CropSettings, SubtitleSettings } from '../types'
+import { VideoFile, SubtitleFile, TrimSettings, ProcessingProgress, AppMode, VideoSegment, CropSettings, SubtitleSettings, SubtitleEntry, SubtitleEditState } from '../types'
+
+const initialSubtitleEdit: SubtitleEditState = {
+  entries: [],
+  isDirty: false,
+  isBilingual: false,
+  primaryLanguage: 'English',
+  secondaryLanguage: 'Chinese',
+  editedFilePath: null,
+}
 
 interface VideoStore {
   videoFile: VideoFile | null
@@ -15,6 +24,8 @@ interface VideoStore {
   mergeVideoFiles: VideoFile[]
   cropSettings: CropSettings
   subtitleSettings: SubtitleSettings
+  subtitleEdit: SubtitleEditState
+  isEditingSubtitles: boolean
 
   setVideoFile: (file: VideoFile | null) => void
   setSubtitleFile: (file: SubtitleFile | null) => void
@@ -36,6 +47,16 @@ interface VideoStore {
   clearMergeVideos: () => void
   setCropSettings: (settings: Partial<CropSettings>) => void
   setSubtitleSettings: (settings: Partial<SubtitleSettings>) => void
+  setSubtitleEntries: (entries: SubtitleEntry[]) => void
+  updateSubtitleEntry: (id: string, updates: Partial<Pick<SubtitleEntry, 'startTimeMs' | 'endTimeMs' | 'text' | 'bilingualText'>>) => void
+  addSubtitleEntry: (entry: SubtitleEntry) => void
+  removeSubtitleEntry: (id: string) => void
+  setBilingualMode: (enabled: boolean) => void
+  setPrimaryLanguage: (lang: string) => void
+  setSecondaryLanguage: (lang: string) => void
+  setEditedFilePath: (path: string | null) => void
+  setIsEditingSubtitles: (editing: boolean) => void
+  clearSubtitleEdit: () => void
 }
 
 export const useVideoStore = create<VideoStore>((set) => ({
@@ -52,6 +73,8 @@ export const useVideoStore = create<VideoStore>((set) => ({
   mergeVideoFiles: [],
   cropSettings: { enabled: false, width: 1920, height: 1080, x: 0, y: 0 },
   subtitleSettings: { font: '', fontSize: 24 },
+  subtitleEdit: { ...initialSubtitleEdit },
+  isEditingSubtitles: false,
 
   setVideoFile: (file) => set({ videoFile: file }),
   setSubtitleFile: (file) => set({ subtitleFile: file }),
@@ -79,6 +102,8 @@ export const useVideoStore = create<VideoStore>((set) => ({
       mergeVideoFiles: [],
       cropSettings: { enabled: false, width: 1920, height: 1080, x: 0, y: 0 },
       subtitleSettings: { font: '', fontSize: 24 },
+      subtitleEdit: { ...initialSubtitleEdit },
+      isEditingSubtitles: false,
     }),
   setMode: (mode) => set({ mode }),
   addSegment: () => set((state) => {
@@ -117,4 +142,44 @@ export const useVideoStore = create<VideoStore>((set) => ({
   setSubtitleSettings: (settings) => set((state) => ({
     subtitleSettings: { ...state.subtitleSettings, ...settings },
   })),
+  setSubtitleEntries: (entries) => set((state) => ({
+    subtitleEdit: { ...state.subtitleEdit, entries, isDirty: true },
+  })),
+  updateSubtitleEntry: (id, updates) => set((state) => ({
+    subtitleEdit: {
+      ...state.subtitleEdit,
+      entries: state.subtitleEdit.entries.map(e =>
+        e.id === id ? { ...e, ...updates } : e
+      ),
+      isDirty: true,
+    },
+  })),
+  addSubtitleEntry: (entry) => set((state) => ({
+    subtitleEdit: {
+      ...state.subtitleEdit,
+      entries: [...state.subtitleEdit.entries, entry],
+      isDirty: true,
+    },
+  })),
+  removeSubtitleEntry: (id) => set((state) => ({
+    subtitleEdit: {
+      ...state.subtitleEdit,
+      entries: state.subtitleEdit.entries.filter(e => e.id !== id),
+      isDirty: true,
+    },
+  })),
+  setBilingualMode: (enabled) => set((state) => ({
+    subtitleEdit: { ...state.subtitleEdit, isBilingual: enabled },
+  })),
+  setPrimaryLanguage: (lang) => set((state) => ({
+    subtitleEdit: { ...state.subtitleEdit, primaryLanguage: lang },
+  })),
+  setSecondaryLanguage: (lang) => set((state) => ({
+    subtitleEdit: { ...state.subtitleEdit, secondaryLanguage: lang },
+  })),
+  setEditedFilePath: (path) => set((state) => ({
+    subtitleEdit: { ...state.subtitleEdit, editedFilePath: path, isDirty: false },
+  })),
+  setIsEditingSubtitles: (editing) => set({ isEditingSubtitles: editing }),
+  clearSubtitleEdit: () => set({ subtitleEdit: { ...initialSubtitleEdit }, isEditingSubtitles: false }),
 }))

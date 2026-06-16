@@ -3,6 +3,7 @@ import { useVideoStore } from '../store/useVideoStore'
 import { tauriAPI } from '../lib/tauri-api'
 import { logger } from '../lib/logger'
 import { formatTime } from '../utils/timeFormatting'
+import { serializeSrt } from '../utils/srtParser'
 
 const ProcessingPanel: React.FC = () => {
   const {
@@ -13,6 +14,7 @@ const ProcessingPanel: React.FC = () => {
     brightness,
     cropSettings,
     subtitleSettings,
+    subtitleEdit,
     segments,
     mergeVideoFiles,
     isProcessing,
@@ -164,12 +166,22 @@ const ProcessingPanel: React.FC = () => {
           setProcessing(false)
           return
         }
+
+        let effectiveSubtitlePath: string | undefined = subtitleFile?.path
+        if (subtitleFile && subtitleEdit.entries.length > 0 && subtitleEdit.isDirty) {
+          const content = serializeSrt(subtitleEdit.entries, subtitleEdit.isBilingual)
+          const tempPath = await tauriAPI.writeTempSubtitle(content)
+          effectiveSubtitlePath = tempPath
+        } else if (subtitleFile && subtitleEdit.editedFilePath) {
+          effectiveSubtitlePath = subtitleEdit.editedFilePath
+        }
+
         jobId = await tauriAPI.processVideo({
           inputFile: videoFile.path,
           outputFile: outputPath,
           startTime: trimSettings.startTime,
           endTime: trimSettings.endTime,
-          subtitleFile: subtitleFile?.path,
+          subtitleFile: effectiveSubtitlePath,
           subtitleFont: subtitleFile && subtitleSettings.font ? subtitleSettings.font : undefined,
           subtitleFontSize: subtitleFile ? subtitleSettings.fontSize : undefined,
           brightness: brightness !== 0 ? brightness : undefined,
@@ -284,6 +296,17 @@ const ProcessingPanel: React.FC = () => {
                 <div>
                   <p className="text-xs uppercase tracking-wide text-gray-500">Subtitles</p>
                   <p className="font-medium">{subtitleFile ? subtitleFile.name : 'None'}</p>
+                  {subtitleEdit.isBilingual && subtitleFile && (
+                    <p className="text-xs text-primary-600">
+                      Bilingual ({subtitleEdit.primaryLanguage} + {subtitleEdit.secondaryLanguage})
+                    </p>
+                  )}
+                  {subtitleEdit.isDirty && subtitleFile && (
+                    <p className="text-xs text-amber-600">Edited (unsaved)</p>
+                  )}
+                  {subtitleEdit.editedFilePath && !subtitleEdit.isDirty && subtitleFile && (
+                    <p className="text-xs text-green-600">Edited</p>
+                  )}
                 </div>
                 {subtitleFile && (subtitleSettings.font || subtitleSettings.fontSize !== 24) && (
                   <div>

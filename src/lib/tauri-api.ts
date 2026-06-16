@@ -193,4 +193,16 @@ export const tauriAPI = {
     if (!selected) return null;
     return Array.isArray(selected) ? selected : [selected];
   },
+
+  readSubtitleFile: async (filePath: string): Promise<string> => {
+    return await invoke<string>('read_subtitle_file', { filePath });
+  },
+
+  writeSubtitleFile: async (content: string, originalPath: string | null): Promise<string> => {
+    return await invoke<string>('write_subtitle_file', { content, originalPath });
+  },
+
+  writeTempSubtitle: async (content: string): Promise<string> => {
+    return await invoke<string>('write_temp_subtitle', { content });
+  },
 };

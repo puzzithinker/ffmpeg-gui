@@ -4,7 +4,7 @@ import { tauriAPI } from '../lib/tauri-api'
 import { logger } from '../lib/logger'
 
 const FileSelector: React.FC = () => {
-  const { mode, videoFile, subtitleFile, setVideoFile, setSubtitleFile, setError, setTrimSettings } = useVideoStore()
+  const { mode, videoFile, subtitleFile, setVideoFile, setSubtitleFile, setError, setTrimSettings, isEditingSubtitles, setIsEditingSubtitles } = useVideoStore()
 
   const handleVideoSelect = async () => {
     try {
@@ -117,12 +117,24 @@ const FileSelector: React.FC = () => {
                 <p className="text-xs text-gray-500 break-all">{subtitleFile.path}</p>
                 <p className="text-sm text-gray-500">Subtitle file loaded</p>
               </div>
-              <button
-                onClick={handleRemoveSubtitle}
-                className="text-red-500 hover:text-red-700 font-medium"
-              >
-                Remove
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsEditingSubtitles(!isEditingSubtitles)}
+                  className={`px-3 py-1 rounded-md text-sm font-medium ${
+                    isEditingSubtitles
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-primary-500 hover:bg-primary-600 text-white'
+                  }`}
+                >
+                  {isEditingSubtitles ? 'Close Editor' : 'Edit'}
+                </button>
+                <button
+                  onClick={handleRemoveSubtitle}
+                  className="text-red-500 hover:text-red-700 font-medium"
+                >
+                  Remove
+                </button>
+              </div>
             </div>
           ) : (
             <div className="text-center">
