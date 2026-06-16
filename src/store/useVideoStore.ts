@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { VideoFile, SubtitleFile, TrimSettings, ProcessingProgress, AppMode, VideoSegment, CropSettings, SubtitleSettings, SubtitleEntry, SubtitleEditState } from '../types'
+import { VideoFile, SubtitleFile, TrimSettings, ProcessingProgress, AppMode, VideoSegment, CropSettings, SubtitleSettings, SubtitleEntry, SubtitleEditState, SecondaryLanguagePosition } from '../types'
 
 const initialSubtitleEdit: SubtitleEditState = {
   entries: [],
@@ -7,6 +7,7 @@ const initialSubtitleEdit: SubtitleEditState = {
   isBilingual: false,
   primaryLanguage: 'English',
   secondaryLanguage: 'Chinese',
+  secondaryLanguagePosition: 'after',
   editedFilePath: null,
 }
 
@@ -56,6 +57,7 @@ interface VideoStore {
   setSecondaryLanguage: (lang: string) => void
   setEditedFilePath: (path: string | null) => void
   setIsEditingSubtitles: (editing: boolean) => void
+  setSecondaryLanguagePosition: (position: SecondaryLanguagePosition) => void
   clearSubtitleEdit: () => void
 }
 
@@ -72,7 +74,7 @@ export const useVideoStore = create<VideoStore>((set) => ({
   segments: [],
   mergeVideoFiles: [],
   cropSettings: { enabled: false, width: 1920, height: 1080, x: 0, y: 0 },
-  subtitleSettings: { font: '', fontSize: 24 },
+  subtitleSettings: { font: '', fontSize: 24, fontSizeAuto: true },
   subtitleEdit: { ...initialSubtitleEdit },
   isEditingSubtitles: false,
 
@@ -101,7 +103,7 @@ export const useVideoStore = create<VideoStore>((set) => ({
       segments: [],
       mergeVideoFiles: [],
       cropSettings: { enabled: false, width: 1920, height: 1080, x: 0, y: 0 },
-      subtitleSettings: { font: '', fontSize: 24 },
+subtitleSettings: { font: '', fontSize: 24, fontSizeAuto: true },
       subtitleEdit: { ...initialSubtitleEdit },
       isEditingSubtitles: false,
     }),
@@ -181,5 +183,8 @@ export const useVideoStore = create<VideoStore>((set) => ({
     subtitleEdit: { ...state.subtitleEdit, editedFilePath: path, isDirty: false },
   })),
   setIsEditingSubtitles: (editing) => set({ isEditingSubtitles: editing }),
+  setSecondaryLanguagePosition: (position) => set((state) => ({
+    subtitleEdit: { ...state.subtitleEdit, secondaryLanguagePosition: position },
+  })),
   clearSubtitleEdit: () => set({ subtitleEdit: { ...initialSubtitleEdit }, isEditingSubtitles: false }),
 }))

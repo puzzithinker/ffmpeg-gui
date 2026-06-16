@@ -132,6 +132,23 @@ describe('serializeSrt', () => {
     expect(result).toBe('1\n00:00:01,000 --> 00:00:04,500\nHello')
   })
 
+  it('should place secondary language after primary by default (secondaryPosition=after)', () => {
+    const result = serializeSrt(entries, true, 'after')
+    expect(result).toContain('Hello\n你好')
+    expect(result).toContain('Goodbye\n再见')
+  })
+
+  it('should place secondary language before primary when secondaryPosition=before', () => {
+    const result = serializeSrt(entries, true, 'before')
+    expect(result).toContain('你好\nHello')
+    expect(result).toContain('再见\nGoodbye')
+  })
+
+  it('should default to after when secondaryPosition is omitted', () => {
+    const result = serializeSrt(entries, true)
+    expect(result).toContain('Hello\n你好')
+  })
+
   it('should re-index entries sequentially', () => {
     const outOfOrder = [
       { id: 'b', index: 5, startTimeMs: 5000, endTimeMs: 8000, text: 'Second', bilingualText: '' },

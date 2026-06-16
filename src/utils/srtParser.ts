@@ -1,4 +1,4 @@
-import type { SubtitleEntry } from '../types'
+import type { SubtitleEntry, SecondaryLanguagePosition } from '../types'
 
 const SRT_TIMESTAMP_RE = /^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})$/
 
@@ -102,14 +102,16 @@ export function parseSrt(content: string): SubtitleEntry[] {
   return entries
 }
 
-export function serializeSrt(entries: SubtitleEntry[], bilingual: boolean = false): string {
+export function serializeSrt(entries: SubtitleEntry[], bilingual: boolean = false, secondaryPosition: SecondaryLanguagePosition = 'after'): string {
   return entries
     .map((entry, i) => {
       const index = i + 1
       const start = msToSrtTime(entry.startTimeMs)
       const end = msToSrtTime(entry.endTimeMs)
       const textLines = bilingual && entry.bilingualText
-        ? entry.text + '\n' + entry.bilingualText
+        ? secondaryPosition === 'before'
+          ? entry.bilingualText + '\n' + entry.text
+          : entry.text + '\n' + entry.bilingualText
         : entry.text
       return `${index}\n${start} --> ${end}\n${textLines}`
     })

@@ -51,6 +51,7 @@ export interface CropSettings {
 export interface SubtitleSettings {
   font: string
   fontSize: number
+  fontSizeAuto: boolean
 }
 
 export interface MultiCutMergeParams {
@@ -77,11 +78,14 @@ export interface SubtitleEntry {
   bilingualText: string
 }
 
+export type SecondaryLanguagePosition = 'before' | 'after'
+
 export interface SubtitleEditState {
   entries: SubtitleEntry[]
   isDirty: boolean
   isBilingual: boolean
   primaryLanguage: string
   secondaryLanguage: string
+  secondaryLanguagePosition: SecondaryLanguagePosition
   editedFilePath: string | null
 }

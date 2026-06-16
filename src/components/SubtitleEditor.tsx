@@ -15,6 +15,7 @@ const SubtitleEditor: React.FC = () => {
     setBilingualMode,
     setPrimaryLanguage,
     setSecondaryLanguage,
+    setSecondaryLanguagePosition,
     setEditedFilePath,
     clearSubtitleEdit,
   } = useVideoStore()
@@ -79,7 +80,7 @@ const SubtitleEditor: React.FC = () => {
     if (subtitleEdit.entries.length === 0) return
     setExporting(true)
     try {
-      const content = serializeSrt(subtitleEdit.entries, subtitleEdit.isBilingual)
+      const content = serializeSrt(subtitleEdit.entries, subtitleEdit.isBilingual, subtitleEdit.secondaryLanguagePosition)
       const path = await tauriAPI.writeSubtitleFile(content, subtitleFile?.path ?? null)
       setEditedFilePath(path)
     } catch {
@@ -162,6 +163,17 @@ const SubtitleEditor: React.FC = () => {
                 onChange={(e) => setSecondaryLanguage(e.target.value)}
                 className="w-24 px-2 py-1 border border-gray-300 rounded-md text-sm"
               />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-500">Position</label>
+              <select
+                value={subtitleEdit.secondaryLanguagePosition}
+                onChange={(e) => setSecondaryLanguagePosition(e.target.value as 'before' | 'after')}
+                className="px-2 py-1 border border-gray-300 rounded-md text-sm"
+              >
+                <option value="after">{subtitleEdit.primaryLanguage} on top</option>
+                <option value="before">{subtitleEdit.secondaryLanguage} on top</option>
+              </select>
             </div>
           </>
         )}
