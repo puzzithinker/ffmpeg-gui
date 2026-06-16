@@ -169,7 +169,7 @@ const ProcessingPanel: React.FC = () => {
 
         let effectiveSubtitlePath: string | undefined = subtitleFile?.path
         if (subtitleFile && subtitleEdit.entries.length > 0 && subtitleEdit.isDirty) {
-          const content = serializeSrt(subtitleEdit.entries, subtitleEdit.isBilingual)
+          const content = serializeSrt(subtitleEdit.entries, subtitleEdit.isBilingual, subtitleEdit.secondaryLanguagePosition)
           const tempPath = await tauriAPI.writeTempSubtitle(content)
           effectiveSubtitlePath = tempPath
         } else if (subtitleFile && subtitleEdit.editedFilePath) {
@@ -183,7 +183,7 @@ const ProcessingPanel: React.FC = () => {
           endTime: trimSettings.endTime,
           subtitleFile: effectiveSubtitlePath,
           subtitleFont: subtitleFile && subtitleSettings.font ? subtitleSettings.font : undefined,
-          subtitleFontSize: subtitleFile ? subtitleSettings.fontSize : undefined,
+          subtitleFontSize: subtitleFile && !subtitleSettings.fontSizeAuto ? subtitleSettings.fontSize : undefined,
           brightness: brightness !== 0 ? brightness : undefined,
           cropWidth: cropSettings.enabled ? cropSettings.width : undefined,
           cropHeight: cropSettings.enabled ? cropSettings.height : undefined,
@@ -308,10 +308,13 @@ const ProcessingPanel: React.FC = () => {
                     <p className="text-xs text-green-600">Edited</p>
                   )}
                 </div>
-                {subtitleFile && (subtitleSettings.font || subtitleSettings.fontSize !== 24) && (
+                {subtitleFile && (subtitleSettings.font || !subtitleSettings.fontSizeAuto) && (
                   <div>
                     <p className="text-xs uppercase tracking-wide text-gray-500">Subtitle Style</p>
-                    <p className="font-medium">{subtitleSettings.font || 'Default font'}{subtitleSettings.fontSize !== 24 ? `, ${subtitleSettings.fontSize}px` : ''}</p>
+                    <p className="font-medium">
+                      {subtitleSettings.font || 'Default font'}
+                      {!subtitleSettings.fontSizeAuto ? `, ${subtitleSettings.fontSize}px` : ', auto size'}
+                    </p>
                   </div>
                 )}
                 <div>
