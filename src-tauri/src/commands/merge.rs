@@ -22,12 +22,14 @@ pub struct MultiCutMergeParams {
     pub crop_height: Option<u32>,
     pub crop_x: Option<u32>,
     pub crop_y: Option<u32>,
+    pub crf: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeVideosParams {
     pub input_files: Vec<String>,
     pub output_file: String,
+    pub crf: Option<u32>,
 }
 
 #[tauri::command]
@@ -126,6 +128,9 @@ pub async fn multi_cut_merge(
         args.push("-c:a".to_string());
         args.push("aac".to_string());
     }
+    let crf_value = params.crf.unwrap_or(18);
+    args.push("-crf".to_string());
+    args.push(crf_value.to_string());
     args.push("-y".to_string());
     args.push(params.output_file.clone());
 
@@ -269,6 +274,9 @@ pub async fn merge_videos(
         args.push("-c:a".to_string());
         args.push("aac".to_string());
     }
+    let crf_value = params.crf.unwrap_or(18);
+    args.push("-crf".to_string());
+    args.push(crf_value.to_string());
     args.push("-y".to_string());
     args.push(params.output_file.clone());
 

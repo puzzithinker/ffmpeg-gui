@@ -14,6 +14,13 @@ export interface TrimSettings {
   endTime: number
 }
 
+export type QualityMode = 'copy' | 'reencode'
+
+export interface QualitySettings {
+  mode: QualityMode
+  crf: number
+}
+
 export interface ProcessingOptions {
   inputFile: string
   outputFile: string
@@ -25,6 +32,8 @@ export interface ProcessingOptions {
   cropHeight?: number
   cropX?: number
   cropY?: number
+  qualityMode?: string
+  crf?: number
 }
 
 export interface ProcessingProgress {
@@ -62,11 +71,13 @@ export interface MultiCutMergeParams {
   cropHeight?: number
   cropX?: number
   cropY?: number
+  crf?: number
 }
 
 export interface MergeVideosParams {
   inputFiles: string[]
   outputFile: string
+  crf?: number
 }
 
 export interface SubtitleEntry {

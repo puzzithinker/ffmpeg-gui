@@ -17,6 +17,8 @@ export interface ProcessVideoParams {
   cropHeight?: number;
   cropX?: number;
   cropY?: number;
+  qualityMode?: string;
+  crf?: number;
 }
 
 export interface ProgressEvent {
@@ -116,6 +118,8 @@ export const tauriAPI = {
         crop_height: params.cropHeight,
         crop_x: params.cropX,
         crop_y: params.cropY,
+        quality_mode: params.qualityMode,
+        crf: params.crf,
       },
     });
   },
@@ -167,6 +171,7 @@ export const tauriAPI = {
         crop_height: params.cropHeight,
         crop_x: params.cropX,
         crop_y: params.cropY,
+        crf: params.crf,
       },
     });
   },
@@ -176,6 +181,7 @@ export const tauriAPI = {
       params: {
         input_files: params.inputFiles,
         output_file: params.outputFile,
+        crf: params.crf,
       },
     });
   },

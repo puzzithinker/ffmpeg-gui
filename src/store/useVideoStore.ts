@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { VideoFile, SubtitleFile, TrimSettings, ProcessingProgress, AppMode, VideoSegment, CropSettings, SubtitleSettings, SubtitleEntry, SubtitleEditState, SecondaryLanguagePosition } from '../types'
+import { VideoFile, SubtitleFile, TrimSettings, ProcessingProgress, AppMode, VideoSegment, CropSettings, SubtitleSettings, SubtitleEntry, SubtitleEditState, SecondaryLanguagePosition, QualitySettings, QualityMode } from '../types'
 
 const initialSubtitleEdit: SubtitleEditState = {
   entries: [],
@@ -27,6 +27,7 @@ interface VideoStore {
   subtitleSettings: SubtitleSettings
   subtitleEdit: SubtitleEditState
   isEditingSubtitles: boolean
+  qualitySettings: QualitySettings
 
   setVideoFile: (file: VideoFile | null) => void
   setSubtitleFile: (file: SubtitleFile | null) => void
@@ -59,6 +60,7 @@ interface VideoStore {
   setIsEditingSubtitles: (editing: boolean) => void
   setSecondaryLanguagePosition: (position: SecondaryLanguagePosition) => void
   clearSubtitleEdit: () => void
+  setQualitySettings: (settings: Partial<QualitySettings>) => void
 }
 
 export const useVideoStore = create<VideoStore>((set) => ({
@@ -77,6 +79,7 @@ export const useVideoStore = create<VideoStore>((set) => ({
   subtitleSettings: { font: '', fontSize: 24, fontSizeAuto: true },
   subtitleEdit: { ...initialSubtitleEdit },
   isEditingSubtitles: false,
+  qualitySettings: { mode: 'copy' as QualityMode, crf: 18 },
 
   setVideoFile: (file) => set({ videoFile: file }),
   setSubtitleFile: (file) => set({ subtitleFile: file }),
@@ -103,9 +106,10 @@ export const useVideoStore = create<VideoStore>((set) => ({
       segments: [],
       mergeVideoFiles: [],
       cropSettings: { enabled: false, width: 1920, height: 1080, x: 0, y: 0 },
-subtitleSettings: { font: '', fontSize: 24, fontSizeAuto: true },
+      subtitleSettings: { font: '', fontSize: 24, fontSizeAuto: true },
       subtitleEdit: { ...initialSubtitleEdit },
       isEditingSubtitles: false,
+      qualitySettings: { mode: 'copy' as QualityMode, crf: 18 },
     }),
   setMode: (mode) => set({ mode }),
   addSegment: () => set((state) => {
@@ -187,4 +191,7 @@ subtitleSettings: { font: '', fontSize: 24, fontSizeAuto: true },
     subtitleEdit: { ...state.subtitleEdit, secondaryLanguagePosition: position },
   })),
   clearSubtitleEdit: () => set({ subtitleEdit: { ...initialSubtitleEdit }, isEditingSubtitles: false }),
+  setQualitySettings: (settings) => set((state) => ({
+    qualitySettings: { ...state.qualitySettings, ...settings },
+  })),
 }))

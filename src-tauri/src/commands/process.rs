@@ -22,6 +22,8 @@ pub struct ProcessVideoParams {
     pub crop_height: Option<u32>,
     pub crop_x: Option<u32>,
     pub crop_y: Option<u32>,
+    pub quality_mode: Option<String>,
+    pub crf: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -295,66 +297,100 @@ fn validate_inputs(params: &ProcessVideoParams) -> Result<(), String> {
 }
 
 fn build_ffmpeg_args(params: &ProcessVideoParams) -> Result<Vec<String>, String> {
-    let mut args = vec!["-i".to_string(), params.input_file.clone()];
+    let has_filters = params.crop_width.is_some()
+        || params.crop_height.is_some()
+        || params.brightness.map_or(false, |b| b.abs() > 0.001)
+        || params.subtitle_file.is_some();
 
-    if let (Some(start), Some(end)) = (params.start_time, params.end_time) {
-        args.push("-ss".to_string());
-        args.push(start.to_string());
-        args.push("-to".to_string());
-        args.push(end.to_string());
-    }
+    let effective_mode = match params.quality_mode.as_deref() {
+        Some("copy") if has_filters => "reencode",
+        Some("copy") => "copy",
+        Some("reencode") => "reencode",
+        None if has_filters => "reencode",
+        None => "copy",
+        _ => "reencode",
+    };
 
-    // Build video filter chain
-    let mut filters: Vec<String> = Vec::new();
+    let mut args: Vec<String> = Vec::new();
 
-    if let (Some(w), Some(h)) = (params.crop_width, params.crop_height) {
-        let x = params.crop_x.unwrap_or(0);
-        let y = params.crop_y.unwrap_or(0);
-        filters.push(format!("crop={}:{}:{}:{}", w, h, x, y));
-    }
-
-    if let Some(brightness) = params.brightness {
-        if brightness.abs() > 0.001 {
-            filters.push(format!("eq=brightness={}", brightness));
+    if effective_mode == "copy" {
+        if let Some(start) = params.start_time {
+            args.push("-ss".to_string());
+            args.push(start.to_string());
         }
-    }
+        args.push("-i".to_string());
+        args.push(params.input_file.clone());
+        if let (Some(start), Some(end)) = (params.start_time, params.end_time) {
+            let duration = end - start;
+            args.push("-t".to_string());
+            args.push(duration.to_string());
+        }
+        args.push("-c".to_string());
+        args.push("copy".to_string());
+        args.push("-y".to_string());
+        args.push(params.output_file.clone());
+    } else {
+        args.push("-i".to_string());
+        args.push(params.input_file.clone());
 
-    // Add subtitles filter if provided
-    if let Some(ref subtitle_file) = params.subtitle_file {
-        let escaped = escape_subtitle_path(subtitle_file);
-        let mut sub_filter = format!("subtitles=filename='{}'", escaped);
+        if let (Some(start), Some(end)) = (params.start_time, params.end_time) {
+            args.push("-ss".to_string());
+            args.push(start.to_string());
+            args.push("-to".to_string());
+            args.push(end.to_string());
+        }
 
-        // Build force_style if font or font_size is specified
-        let mut style_parts: Vec<String> = Vec::new();
-        if let Some(ref font) = params.subtitle_font {
-            if !font.is_empty() {
-                style_parts.push(format!("FontName={}", font));
+        let mut filters: Vec<String> = Vec::new();
+
+        if let (Some(w), Some(h)) = (params.crop_width, params.crop_height) {
+            let x = params.crop_x.unwrap_or(0);
+            let y = params.crop_y.unwrap_or(0);
+            filters.push(format!("crop={}:{}:{}:{}", w, h, x, y));
+        }
+
+        if let Some(brightness) = params.brightness {
+            if brightness.abs() > 0.001 {
+                filters.push(format!("eq=brightness={}", brightness));
             }
         }
-        if let Some(font_size) = params.subtitle_font_size {
-            if font_size > 0 {
-                style_parts.push(format!("FontSize={}", font_size));
+
+        if let Some(ref subtitle_file) = params.subtitle_file {
+            let escaped = escape_subtitle_path(subtitle_file);
+            let mut sub_filter = format!("subtitles=filename='{}'", escaped);
+
+            let mut style_parts: Vec<String> = Vec::new();
+            if let Some(ref font) = params.subtitle_font {
+                if !font.is_empty() {
+                    style_parts.push(format!("FontName={}", font));
+                }
             }
+            if let Some(font_size) = params.subtitle_font_size {
+                if font_size > 0 {
+                    style_parts.push(format!("FontSize={}", font_size));
+                }
+            }
+            if !style_parts.is_empty() {
+                sub_filter.push_str(&format!(":force_style='{}'", style_parts.join(",")));
+            }
+
+            filters.push(sub_filter);
         }
-        if !style_parts.is_empty() {
-            sub_filter.push_str(&format!(":force_style='{}'", style_parts.join(",")));
+
+        if !filters.is_empty() {
+            args.push("-vf".to_string());
+            args.push(filters.join(","));
         }
 
-        filters.push(sub_filter);
+        let crf_value = params.crf.unwrap_or(18);
+        args.push("-c:v".to_string());
+        args.push("libx264".to_string());
+        args.push("-crf".to_string());
+        args.push(crf_value.to_string());
+        args.push("-c:a".to_string());
+        args.push("aac".to_string());
+        args.push("-y".to_string());
+        args.push(params.output_file.clone());
     }
-
-    // Apply all filters as a chain
-    if !filters.is_empty() {
-        args.push("-vf".to_string());
-        args.push(filters.join(","));
-    }
-
-    args.push("-c:v".to_string());
-    args.push("libx264".to_string());
-    args.push("-c:a".to_string());
-    args.push("aac".to_string());
-    args.push("-y".to_string()); // Overwrite output file if exists
-    args.push(params.output_file.clone());
 
     Ok(args)
 }
@@ -450,6 +486,8 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: None,
+                    crf: None,
                 };
 
         let result = validate_inputs(&params);
@@ -475,6 +513,8 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: None,
+                    crf: None,
                 };
 
         let result = validate_inputs(&params);
@@ -503,6 +543,8 @@ mod tests {
                         crop_height: None,
                         crop_x: None,
                         crop_y: None,
+                        quality_mode: None,
+                        crf: None,
                     };
 
             assert!(validate_inputs(&params).is_ok());
@@ -527,6 +569,8 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: None,
+                    crf: None,
                 };
 
         let result = validate_inputs(&params);
@@ -549,16 +593,17 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: None,
+                    crf: None,
                 };
 
         let args = build_ffmpeg_args(&params).unwrap();
 
-        assert_eq!(args[0], "-i");
-        assert_eq!(args[1], "/input/video.mp4");
-        assert!(args.contains(&"-c:v".to_string()));
-        assert!(args.contains(&"libx264".to_string()));
-        assert!(args.contains(&"-c:a".to_string()));
-        assert!(args.contains(&"aac".to_string()));
+        // Default mode with no filters = copy mode
+        assert!(args.contains(&"-c".to_string()));
+        assert!(args.contains(&"copy".to_string()));
+        assert!(!args.contains(&"libx264".to_string()));
+        assert!(!args.contains(&"-crf".to_string()));
         assert!(args.contains(&"-y".to_string()));
         assert_eq!(args.last().unwrap(), "/output/video.mp4");
     }
@@ -578,6 +623,8 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: Some("reencode".to_string()),
+                    crf: None,
                 };
 
         let args = build_ffmpeg_args(&params).unwrap();
@@ -604,6 +651,8 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: None,
+                    crf: None,
                 };
 
         let args = build_ffmpeg_args(&params).unwrap();
@@ -631,6 +680,8 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: None,
+                    crf: None,
                 };
 
         let args = build_ffmpeg_args(&params).unwrap();
@@ -656,6 +707,8 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: None,
+                    crf: None,
                 };
 
         let args = build_ffmpeg_args(&params).unwrap();
@@ -683,6 +736,8 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: None,
+                    crf: None,
                 };
 
         let args = build_ffmpeg_args(&params).unwrap();
@@ -708,6 +763,8 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: None,
+                    crf: None,
                 };
 
         let args = build_ffmpeg_args(&params).unwrap();
@@ -733,6 +790,8 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: None,
+                    crf: None,
                 };
 
         let args = build_ffmpeg_args(&params).unwrap();
@@ -758,6 +817,8 @@ mod tests {
                     crop_height: None,
                     crop_x: None,
                     crop_y: None,
+                    quality_mode: None,
+                    crf: None,
                 };
 
         let args = build_ffmpeg_args(&params).unwrap();
@@ -766,5 +827,196 @@ mod tests {
         let filter = &args[vf_idx + 1];
         assert!(filter.contains("force_style='FontSize=24'"));
         assert!(!filter.contains("FontName="));
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_copy_mode_no_filters() {
+        let params = ProcessVideoParams {
+            input_file: "/input/video.mp4".to_string(),
+            output_file: "/output/video.mp4".to_string(),
+            start_time: None,
+            end_time: None,
+            subtitle_file: None,
+            subtitle_font: None,
+            subtitle_font_size: None,
+            brightness: None,
+            crop_width: None,
+            crop_height: None,
+            crop_x: None,
+            crop_y: None,
+            quality_mode: Some("copy".to_string()),
+            crf: None,
+        };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        assert!(args.contains(&"-c".to_string()));
+        assert!(args.contains(&"copy".to_string()));
+        assert!(!args.contains(&"libx264".to_string()));
+        assert!(!args.contains(&"-crf".to_string()));
+        assert!(!args.contains(&"-vf".to_string()));
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_copy_mode_with_filters_fallback() {
+        let params = ProcessVideoParams {
+            input_file: "/input/video.mp4".to_string(),
+            output_file: "/output/video.mp4".to_string(),
+            start_time: None,
+            end_time: None,
+            subtitle_file: None,
+            subtitle_font: None,
+            subtitle_font_size: None,
+            brightness: Some(0.5),
+            crop_width: None,
+            crop_height: None,
+            crop_x: None,
+            crop_y: None,
+            quality_mode: Some("copy".to_string()),
+            crf: None,
+        };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        assert!(args.contains(&"libx264".to_string()));
+        assert!(args.contains(&"-crf".to_string()));
+        assert!(args.contains(&"18".to_string()));
+        assert!(!args.contains(&"copy".to_string()));
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_reencode_mode_default_crf() {
+        let params = ProcessVideoParams {
+            input_file: "/input/video.mp4".to_string(),
+            output_file: "/output/video.mp4".to_string(),
+            start_time: None,
+            end_time: None,
+            subtitle_file: None,
+            subtitle_font: None,
+            subtitle_font_size: None,
+            brightness: None,
+            crop_width: None,
+            crop_height: None,
+            crop_x: None,
+            crop_y: None,
+            quality_mode: Some("reencode".to_string()),
+            crf: None,
+        };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        let crf_idx = args.iter().position(|x| x == "-crf").unwrap();
+        assert_eq!(args[crf_idx + 1], "18");
+        assert!(args.contains(&"libx264".to_string()));
+        assert!(args.contains(&"aac".to_string()));
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_reencode_mode_custom_crf() {
+        let params = ProcessVideoParams {
+            input_file: "/input/video.mp4".to_string(),
+            output_file: "/output/video.mp4".to_string(),
+            start_time: None,
+            end_time: None,
+            subtitle_file: None,
+            subtitle_font: None,
+            subtitle_font_size: None,
+            brightness: None,
+            crop_width: None,
+            crop_height: None,
+            crop_x: None,
+            crop_y: None,
+            quality_mode: Some("reencode".to_string()),
+            crf: Some(23),
+        };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        let crf_idx = args.iter().position(|x| x == "-crf").unwrap();
+        assert_eq!(args[crf_idx + 1], "23");
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_copy_mode_fast_seek() {
+        let params = ProcessVideoParams {
+            input_file: "/input/video.mp4".to_string(),
+            output_file: "/output/video.mp4".to_string(),
+            start_time: Some(10.0),
+            end_time: Some(60.0),
+            subtitle_file: None,
+            subtitle_font: None,
+            subtitle_font_size: None,
+            brightness: None,
+            crop_width: None,
+            crop_height: None,
+            crop_x: None,
+            crop_y: None,
+            quality_mode: Some("copy".to_string()),
+            crf: None,
+        };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        let ss_idx = args.iter().position(|x| x == "-ss").unwrap();
+        let i_idx = args.iter().position(|x| x == "-i").unwrap();
+        assert!(ss_idx < i_idx, "-ss should appear before -i in copy mode");
+
+        let t_idx = args.iter().position(|x| x == "-t");
+        assert!(t_idx.is_some(), "-t (duration) should be present in copy mode");
+        assert_eq!(args[t_idx.unwrap() + 1], "50");
+
+        assert!(!args.contains(&"-to".to_string()), "-to should not be used in copy mode");
+    }
+
+    #[test]
+    fn test_default_mode_no_filters_uses_copy() {
+        let params = ProcessVideoParams {
+            input_file: "/input/video.mp4".to_string(),
+            output_file: "/output/video.mp4".to_string(),
+            start_time: None,
+            end_time: None,
+            subtitle_file: None,
+            subtitle_font: None,
+            subtitle_font_size: None,
+            brightness: None,
+            crop_width: None,
+            crop_height: None,
+            crop_x: None,
+            crop_y: None,
+            quality_mode: None,
+            crf: None,
+        };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        assert!(args.contains(&"-c".to_string()));
+        assert!(args.contains(&"copy".to_string()));
+        assert!(!args.contains(&"libx264".to_string()));
+    }
+
+    #[test]
+    fn test_default_mode_with_filters_uses_reencode() {
+        let params = ProcessVideoParams {
+            input_file: "/input/video.mp4".to_string(),
+            output_file: "/output/video.mp4".to_string(),
+            start_time: None,
+            end_time: None,
+            subtitle_file: None,
+            subtitle_font: None,
+            subtitle_font_size: None,
+            brightness: Some(0.5),
+            crop_width: None,
+            crop_height: None,
+            crop_x: None,
+            crop_y: None,
+            quality_mode: None,
+            crf: None,
+        };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        assert!(args.contains(&"libx264".to_string()));
+        let crf_idx = args.iter().position(|x| x == "-crf").unwrap();
+        assert_eq!(args[crf_idx + 1], "18");
     }
 }

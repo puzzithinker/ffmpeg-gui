@@ -24,9 +24,28 @@ const ProcessingPanel: React.FC = () => {
     setError,
     currentJobId,
     setCurrentJobId,
+    qualitySettings,
+    setQualitySettings,
   } = useVideoStore()
 
   const [outputPath, setOutputPath] = useState('')
+
+  const hasFilters = mode === 'trim'
+    ? cropSettings.enabled || brightness !== 0 || !!subtitleFile
+    : true
+
+  useEffect(() => {
+    if (hasFilters && qualitySettings.mode === 'copy') {
+      setQualitySettings({ mode: 'reencode' })
+    }
+  }, [hasFilters, qualitySettings.mode, setQualitySettings])
+
+  const getCrfLabel = (crf: number): string => {
+    if (crf <= 15) return 'Near lossless'
+    if (crf <= 22) return 'High quality'
+    if (crf <= 28) return 'Medium quality'
+    return 'Low quality / small file'
+  }
 
   const getCanProcess = () => {
     if (isProcessing || !outputPath) return false
@@ -189,6 +208,8 @@ const ProcessingPanel: React.FC = () => {
           cropHeight: cropSettings.enabled ? cropSettings.height : undefined,
           cropX: cropSettings.enabled ? cropSettings.x : undefined,
           cropY: cropSettings.enabled ? cropSettings.y : undefined,
+          qualityMode: qualitySettings.mode,
+          crf: qualitySettings.mode === 'reencode' ? qualitySettings.crf : undefined,
         })
       } else if (mode === 'multi-cut') {
         if (!videoFile || segments.length === 0) {
@@ -204,6 +225,7 @@ const ProcessingPanel: React.FC = () => {
           cropHeight: cropSettings.enabled ? cropSettings.height : undefined,
           cropX: cropSettings.enabled ? cropSettings.x : undefined,
           cropY: cropSettings.enabled ? cropSettings.y : undefined,
+          crf: qualitySettings.crf,
         })
       } else {
         if (mergeVideoFiles.length < 2) {
@@ -214,6 +236,7 @@ const ProcessingPanel: React.FC = () => {
         jobId = await tauriAPI.mergeVideos({
           inputFiles: mergeVideoFiles.map(f => f.path),
           outputFile: outputPath,
+          crf: qualitySettings.crf,
         })
       }
 
@@ -351,6 +374,77 @@ const ProcessingPanel: React.FC = () => {
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">Videos</p>
                 <p className="font-medium">{mergeVideoFiles.length} file{mergeVideoFiles.length !== 1 ? 's' : ''}</p>
+              </div>
+            )}
+            <div>
+              <p className="text-xs uppercase tracking-wide text-gray-500">Quality</p>
+              <p className="font-medium">
+                {qualitySettings.mode === 'copy' && !hasFilters ? 'Exact copy' : `Re-encode (CRF ${qualitySettings.crf})`}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="border-t pt-3">
+          <h3 className="font-medium text-gray-900 mb-2">Quality</h3>
+          <div className="space-y-3">
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="quality"
+                  value="copy"
+                  checked={qualitySettings.mode === 'copy'}
+                  onChange={() => setQualitySettings({ mode: 'copy' })}
+                  disabled={hasFilters || isProcessing}
+                  className="text-primary-600 focus:ring-primary-500"
+                />
+                <span className={`text-sm ${hasFilters ? 'text-gray-400' : 'text-gray-700'}`}>
+                  Exact copy
+                </span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="quality"
+                  value="reencode"
+                  checked={qualitySettings.mode === 'reencode'}
+                  onChange={() => setQualitySettings({ mode: 'reencode' })}
+                  disabled={isProcessing}
+                  className="text-primary-600 focus:ring-primary-500"
+                />
+                <span className="text-sm text-gray-700">Custom quality</span>
+              </label>
+            </div>
+            {hasFilters && qualitySettings.mode === 'copy' && (
+              <p className="text-xs text-amber-600">
+                Filters require re-encoding. Switching to custom quality mode.
+              </p>
+            )}
+            {qualitySettings.mode === 'copy' && !hasFilters && (
+              <p className="text-xs text-gray-500">
+                Fastest. Preserves original quality exactly.
+              </p>
+            )}
+            {qualitySettings.mode === 'reencode' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-700">CRF: {qualitySettings.crf}</span>
+                  <span className="text-xs text-gray-500">{getCrfLabel(qualitySettings.crf)}</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="51"
+                  value={qualitySettings.crf}
+                  onChange={(e) => setQualitySettings({ crf: parseInt(e.target.value) })}
+                  disabled={isProcessing}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                />
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span>0 (lossless)</span>
+                  <span>51 (smallest)</span>
+                </div>
               </div>
             )}
           </div>
