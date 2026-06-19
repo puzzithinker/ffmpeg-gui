@@ -1,12 +1,22 @@
+use crate::commands::apply_no_window;
 use crate::state::{AppState, ProcessJob};
 use std::collections::VecDeque;
+use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio::process::Command;
 use uuid::Uuid;
+
+// Compile the ffmpeg time regex exactly once. `Regex::new` is expensive (NFA build + bytecode
+// generation + heap allocs); calling it per stderr line saturates a CPU core for the entire
+// duration of a job. Requires Rust ≥1.80 for `LazyLock`.
+static TIME_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"time=(\d+):(\d+):(\d+\.?\d*)").unwrap()
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessVideoParams {
@@ -46,9 +56,7 @@ pub struct ErrorPayload {
 
 // Extracted pure functions for testing
 pub fn parse_ffmpeg_time(line: &str) -> Option<f64> {
-    let time_regex = Regex::new(r"time=(\d+):(\d+):(\d+\.?\d*)").unwrap();
-
-    time_regex.captures(line).map(|captures| {
+    TIME_REGEX.captures(line).map(|captures| {
         let hours: f64 = captures[1].parse().unwrap_or(0.0);
         let minutes: f64 = captures[2].parse().unwrap_or(0.0);
         let seconds: f64 = captures[3].parse().unwrap_or(0.0);
@@ -88,13 +96,7 @@ pub async fn process_video(
         .stderr(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped());
 
-    // Hide console window on Windows
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    apply_no_window(&mut command);
 
     let mut child = command
         .spawn()
@@ -123,7 +125,7 @@ pub async fn process_video(
     let app_clone = app.clone();
     let state_clone = state.inner().clone();
     tokio::spawn(async move {
-        monitor_ffmpeg_progress(stderr, job_id, duration, app_clone, state_clone).await;
+        monitor_ffmpeg_progress(stderr, job_id, duration, app_clone, state_clone, None).await;
     });
 
     Ok(job_id.to_string())
@@ -135,11 +137,20 @@ pub async fn monitor_ffmpeg_progress(
     duration: f64,
     app: AppHandle,
     state: AppState,
+    cleanup_path: Option<PathBuf>,
 ) {
     let mut reader = BufReader::new(stderr);
     let mut buf = [0u8; 2048];
     let mut pending = String::new();
     let mut stderr_tail: VecDeque<String> = VecDeque::with_capacity(50);
+
+    // Throttle progress emission: emit at most every 200 ms or on every 1% delta, whichever
+    // comes first. Without this, high-frequency ffmpeg stderr floods the renderer with events
+    // that trigger per-event disk logging + WebView2 re-renders — a GPU TDR / hard-reset vector.
+    let mut last_emit: Option<Instant> = None;
+    let mut last_percent: f64 = -1.0;
+    const MIN_INTERVAL: Duration = Duration::from_millis(200);
+    const MIN_DELTA: f64 = 1.0;
 
     while let Ok(bytes_read) = reader.read(&mut buf).await {
         if bytes_read == 0 {
@@ -150,11 +161,19 @@ pub async fn monitor_ffmpeg_progress(
 
         loop {
             if let Some(pos) = pending.find(['\r', '\n']) {
-                let (segment, rest) = pending.split_at(pos);
+                // Drain the line including its delimiter in one operation, then drop a trailing
+                // paired delimiter (\r\n or \n\r) if present. Fewer String allocations than the
+                // previous split_at + chars().next() + collect() + to_string() chain.
+                let mut end = pos + 1;
+                let bytes = pending.as_bytes();
+                if let Some(&next) = bytes.get(end) {
+                    if (next == b'\r' || next == b'\n') && next as char != bytes[pos] as char {
+                        end += 1;
+                    }
+                }
+                let segment: String = pending.drain(..end).collect();
                 let trimmed = segment.trim();
                 if !trimmed.is_empty() {
-                    log::debug!("ffmpeg stderr [{}]: {}", job_id, trimmed);
-
                     if stderr_tail.len() == 50 {
                         stderr_tail.pop_front();
                     }
@@ -163,43 +182,39 @@ pub async fn monitor_ffmpeg_progress(
                     if let Some(current_seconds) = parse_ffmpeg_time(trimmed) {
                         let percent = calculate_progress_percentage(current_seconds, duration);
 
-                        let _ = app.emit(
-                            "ffmpeg-progress",
-                            ProgressPayload {
-                                job_id: job_id.to_string(),
-                                seconds: current_seconds,
-                                percent,
-                            },
-                        );
-                        log::info!(
-                            "Emitted ffmpeg-progress for job {}: seconds={}, percent={}",
-                            job_id,
-                            current_seconds,
-                            percent
-                        );
+                        let now = Instant::now();
+                        let time_ok = last_emit.map_or(true, |t| now.duration_since(t) >= MIN_INTERVAL);
+                        let delta_ok = (percent - last_percent).abs() >= MIN_DELTA;
+
+                        if time_ok || delta_ok {
+                            let _ = app.emit(
+                                "ffmpeg-progress",
+                                ProgressPayload {
+                                    job_id: job_id.to_string(),
+                                    seconds: current_seconds,
+                                    percent,
+                                },
+                            );
+                            last_emit = Some(now);
+                            last_percent = percent;
+                        }
                     }
                 }
-
-                // Drop the delimiter(s) and continue parsing the remainder
-                let mut rest_iter = rest.chars();
-                let _first = rest_iter.next();
-                let remaining_rest: String = rest_iter.collect();
-                let mut rest_clean = remaining_rest;
-                // Remove an additional delimiter if present (handles \r\n)
-                if rest_clean.starts_with('\n') || rest_clean.starts_with('\r') {
-                    rest_clean = rest_clean[1..].to_string();
-                }
-                pending = rest_clean;
             } else {
                 break;
             }
         }
     }
 
-    // Wait for process to complete
-    let mut jobs = state.active_jobs.lock().await;
+    // Take the job out of the map under the lock, then DROP the lock before waiting.
+    // Holding the mutex across `child.wait().await` serialises every other job operation
+    // (including cancellation of unrelated jobs) for the entire remaining process duration.
+    let job = {
+        let mut jobs = state.active_jobs.lock().await;
+        jobs.remove(&job_id)
+    };
 
-    if let Some(mut job) = jobs.remove(&job_id) {
+    if let Some(mut job) = job {
         match job.child.wait().await {
             Ok(status) => {
                 if status.success() {
@@ -239,6 +254,10 @@ pub async fn monitor_ffmpeg_progress(
                 );
             }
         }
+    }
+
+    if let Some(path) = cleanup_path {
+        let _ = std::fs::remove_file(&path);
     }
 }
 
@@ -401,8 +420,18 @@ fn build_ffmpeg_args(params: &ProcessVideoParams) -> Result<Vec<String>, String>
 //   - Replace backslashes with forward slashes so we don't need to double-escape them.
 //   - Escape drive-letter colons so they aren't interpreted as option separators.
 //   - Escape single quotes because the value is wrapped in single quotes.
+// UNC paths (\\server\share\...) are a special case: a blanket backslash→slash conversion would
+// yield //server/share/..., which ffmpeg's lavf may interpret as a protocol specifier. We
+// therefore preserve the leading \\ as an escaped literal (\\\\ in the filter string) and only
+// normalise the backslashes after the UNC prefix.
 fn escape_subtitle_path(path: &str) -> String {
-    let mut escaped = path.replace('\\', "/");
+    let mut escaped = if path.starts_with(r"\\") {
+        let mut s = String::from(r"\\\\");
+        s.push_str(&path[2..].replace('\\', "/"));
+        s
+    } else {
+        path.replace('\\', "/")
+    };
     escaped = escaped.replace(':', r"\:");
     escaped.replace('\'', r"\'")
 }
@@ -718,6 +747,38 @@ mod tests {
         assert_eq!(
             filter,
             "subtitles=filename='D\\:/My Subs/O\\'Connor/show.srt'"
+        );
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_with_unc_subtitle_path() {
+        // UNC paths (\\server\share\...) must not be blanket-converted to //server/share/...
+        // because ffmpeg's lavf may interpret a leading // as a protocol specifier. The leading
+        // \\ is preserved as an escaped literal; trailing backslashes are normalised to /.
+        let params = ProcessVideoParams {
+                    input_file: "/input/video.mp4".to_string(),
+                    output_file: "/output/video.mp4".to_string(),
+                    start_time: None,
+                    end_time: None,
+                    subtitle_file: Some(r"\\NAS\media\subs\movie.srt".to_string()),
+                    subtitle_font: None,
+                    subtitle_font_size: None,
+                    brightness: None,
+                    crop_width: None,
+                    crop_height: None,
+                    crop_x: None,
+                    crop_y: None,
+                    quality_mode: None,
+                    crf: None,
+                };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+
+        let vf_idx = args.iter().position(|x| x == "-vf").unwrap();
+        let filter = &args[vf_idx + 1];
+        assert_eq!(
+            filter,
+            r"subtitles=filename='\\\\NAS/media/subs/movie.srt'"
         );
     }
 
