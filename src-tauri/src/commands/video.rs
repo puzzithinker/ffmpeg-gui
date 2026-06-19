@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::process::Command;
 
+use crate::commands::apply_no_window;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProbeFormat {
     pub duration: String,
@@ -25,13 +27,16 @@ pub async fn get_duration(file_path: String) -> Result<f64, String> {
     log::debug!("File exists, spawning ffprobe...");
 
     // Spawn ffprobe
-    let output = Command::new("ffprobe")
-        .args(&[
-            "-v", "quiet",
-            "-print_format", "json",
-            "-show_format",
-            &file_path,
-        ])
+    let mut command = Command::new("ffprobe");
+    command.args(&[
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_format",
+        &file_path,
+    ]);
+    apply_no_window(&mut command);
+
+    let output = command
         .output()
         .await
         .map_err(|e| {
@@ -65,8 +70,15 @@ pub async fn get_duration(file_path: String) -> Result<f64, String> {
 
 #[tauri::command]
 pub async fn check_ffmpeg_availability() -> Result<bool, String> {
-    let ffmpeg_check = Command::new("ffmpeg").arg("-version").output().await;
-    let ffprobe_check = Command::new("ffprobe").arg("-version").output().await;
+    let mut ffmpeg_cmd = Command::new("ffmpeg");
+    ffmpeg_cmd.arg("-version");
+    apply_no_window(&mut ffmpeg_cmd);
+    let ffmpeg_check = ffmpeg_cmd.output().await;
+
+    let mut ffprobe_cmd = Command::new("ffprobe");
+    ffprobe_cmd.arg("-version");
+    apply_no_window(&mut ffprobe_cmd);
+    let ffprobe_check = ffprobe_cmd.output().await;
 
     match (ffmpeg_check, ffprobe_check) {
         (Ok(ff), Ok(fp)) if ff.status.success() && fp.status.success() => Ok(true),

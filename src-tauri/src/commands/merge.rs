@@ -1,3 +1,4 @@
+use crate::commands::apply_no_window;
 use crate::commands::process::monitor_ffmpeg_progress;
 use crate::commands::video::get_duration;
 use crate::state::{AppState, ProcessJob};
@@ -139,12 +140,7 @@ pub async fn multi_cut_merge(
     let mut command = Command::new("ffmpeg");
     command.args(&args).stderr(std::process::Stdio::piped());
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    apply_no_window(&mut command);
 
     let mut child = command
         .spawn()
@@ -170,7 +166,7 @@ pub async fn multi_cut_merge(
     let app_clone = app.clone();
     let state_clone = state.inner().clone();
     tokio::spawn(async move {
-        monitor_ffmpeg_progress(stderr, job_id, total_duration, app_clone, state_clone).await;
+        monitor_ffmpeg_progress(stderr, job_id, total_duration, app_clone, state_clone, None).await;
     });
 
     Ok(job_id.to_string())
@@ -205,8 +201,6 @@ pub async fn merge_videos(
         ));
     }
 
-    let n = params.input_files.len();
-
     // Check if ALL input files have audio
     let mut all_have_audio = true;
     for file in &params.input_files {
@@ -216,67 +210,35 @@ pub async fn merge_videos(
         }
     }
 
-    // Build args
-    let mut args: Vec<String> = Vec::new();
+    // Use the concat DEMUXER instead of the concat FILTER. The filter holds frames for all N
+    // inputs in RAM simultaneously (O(N) memory — an OOM / hard-reset vector when merging many
+    // large files). The demuxer streams inputs sequentially (O(1) memory). Resolution/audio
+    // normalisation is applied on the single output stream via -vf/-af.
+    let list_path = std::env::temp_dir().join(format!("ffmpeg_concat_list_{}.txt", job_id));
+    write_concat_list(&list_path, &params.input_files)
+        .map_err(|e| format!("Failed to write concat list: {}", e))?;
 
-    // Add all input files
-    for file in &params.input_files {
-        args.push("-i".to_string());
-        args.push(file.clone());
-    }
-
-    // Build filter_complex
-    let mut filters: Vec<String> = Vec::new();
-    let mut concat_inputs: Vec<String> = Vec::new();
-
-    for i in 0..n {
-        // Ensure all streams are same format by forcing a consistent resolution
-        // and framerate — this is the "auto-transcode" approach
-        filters.push(format!(
-            "[{}:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v{}]",
-            i, i
-        ));
-        if all_have_audio {
-            filters.push(format!(
-                "[{}:a]aresample=44100[a{}]",
-                i, i
-            ));
-            concat_inputs.push(format!("[v{}][a{}]", i, i));
-        } else {
-            concat_inputs.push(format!("[v{}]", i));
-        }
-    }
-
-    let audio_count = if all_have_audio { 1 } else { 0 };
-    filters.push(format!(
-        "{}concat=n={}:v=1:a={}[outv]{}",
-        concat_inputs.join(""),
-        n,
-        audio_count,
-        if all_have_audio { "[outa]" } else { "" }
-    ));
-
-    let filter_complex = filters.join(";");
-
-    args.push("-filter_complex".to_string());
-    args.push(filter_complex);
-    args.push("-map".to_string());
-    args.push("[outv]".to_string());
-
-    if all_have_audio {
-        args.push("-map".to_string());
-        args.push("[outa]".to_string());
-    }
-
-    args.push("-c:v".to_string());
-    args.push("libx264".to_string());
-    if all_have_audio {
-        args.push("-c:a".to_string());
-        args.push("aac".to_string());
-    }
+    let mut args: Vec<String> = vec![
+        "-f".to_string(), "concat".to_string(),
+        "-safe".to_string(), "0".to_string(),
+        "-i".to_string(), list_path.to_string_lossy().to_string(),
+        "-vf".to_string(),
+        "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30".to_string(),
+        "-c:v".to_string(), "libx264".to_string(),
+    ];
     let crf_value = params.crf.unwrap_or(18);
     args.push("-crf".to_string());
     args.push(crf_value.to_string());
+
+    if all_have_audio {
+        args.push("-af".to_string());
+        args.push("aresample=44100".to_string());
+        args.push("-c:a".to_string());
+        args.push("aac".to_string());
+    } else {
+        args.push("-an".to_string());
+    }
+
     args.push("-y".to_string());
     args.push(params.output_file.clone());
 
@@ -285,12 +247,7 @@ pub async fn merge_videos(
     let mut command = Command::new("ffmpeg");
     command.args(&args).stderr(std::process::Stdio::piped());
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    apply_no_window(&mut command);
 
     let mut child = command
         .spawn()
@@ -317,25 +274,39 @@ pub async fn merge_videos(
 
     let app_clone = app.clone();
     let state_clone = state.inner().clone();
+    let cleanup = list_path.clone();
     tokio::spawn(async move {
-        monitor_ffmpeg_progress(stderr, job_id, total_duration, app_clone, state_clone).await;
+        monitor_ffmpeg_progress(stderr, job_id, total_duration, app_clone, state_clone, Some(cleanup)).await;
     });
 
     Ok(job_id.to_string())
 }
 
+/// Write an ffmpeg concat demuxer list file. Paths are single-quoted with `'` escaped as `'\''`;
+/// backslashes are normalised to forward slashes so the demuxer does not interpret them as
+/// escapes (a Windows-specific hazard).
+fn write_concat_list(path: &Path, files: &[String]) -> std::io::Result<()> {
+    let mut content = String::new();
+    for f in files {
+        let normalized = f.replace('\\', "/").replace('\'', "'\\''");
+        content.push_str(&format!("file '{}'\n", normalized));
+    }
+    std::fs::write(path, content)
+}
+
 /// Check if a video file has an audio stream using ffprobe
 async fn check_audio_stream(file_path: &str) -> bool {
-    let output = Command::new("ffprobe")
-        .args(&[
-            "-v", "quiet",
-            "-select_streams", "a",
-            "-show_entries", "stream=codec_type",
-            "-of", "csv=p=0",
-            file_path,
-        ])
-        .output()
-        .await;
+    let mut command = Command::new("ffprobe");
+    command.args(&[
+        "-v", "quiet",
+        "-select_streams", "a",
+        "-show_entries", "stream=codec_type",
+        "-of", "csv=p=0",
+        file_path,
+    ]);
+    apply_no_window(&mut command);
+
+    let output = command.output().await;
 
     match output {
         Ok(out) if out.status.success() => {
