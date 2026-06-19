@@ -95,7 +95,6 @@ const ProcessingPanel: React.FC = () => {
       unlistenProgress = await tauriAPI.onFFmpegProgress((event) => {
         const state = useVideoStore.getState()
         const effectiveJobId = event.jobId || state.currentJobId
-        void logger.log(`[ProcessingPanel] Progress event: jobId=${event.jobId}, percent=${event.percent}`)
 
         if (!effectiveJobId) return
 
