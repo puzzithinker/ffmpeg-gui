@@ -463,7 +463,7 @@ const ProcessingPanel: React.FC = () => {
             </div>
             <div className="w-full bg-primary-100 rounded-full h-2">
               <div
-                className="bg-primary-500 h-2 rounded-full transition-all duration-200"
+                className="bg-primary-500 h-2 rounded-full"
                 style={{ width: `${processingProgress.percentage}%` }}
               />
             </div>
