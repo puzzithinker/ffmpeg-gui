@@ -1080,4 +1080,36 @@ mod tests {
         let crf_idx = args.iter().position(|x| x == "-crf").unwrap();
         assert_eq!(args[crf_idx + 1], "18");
     }
+
+    // Regression guard for the LazyLock regex cache fix (hard-reset vector #1). If a future
+    // change re-introduces per-call `Regex::new` inside `parse_ffmpeg_time`, this test will
+    // fail because compiling a regex 100 000 times is orders of magnitude slower than matching
+    // against a cached one. Marked `#[ignore]` so it doesn't run in the normal `cargo test`
+    // suite (timing-based tests are flaky on shared CI runners); run explicitly with
+    // `cargo test -- --ignored parse_ffmpeg_time_regression`.
+    //
+    // The budget is generous (2 s for 100k calls on one line) to avoid false failures on slow
+    // machines, while still catching the ~50×+ regression from recompiling per call.
+    #[test]
+    #[ignore]
+    fn test_parse_ffmpeg_time_regex_cache_regression() {
+        use std::time::Instant;
+        let line = "frame=  123 fps= 30 q=28.0 size=    1024kB time=00:01:30.50 bitrate= 139.2kbits/s";
+
+        // Warm the LazyLock so the first call's compile cost isn't measured.
+        let _ = parse_ffmpeg_time(line);
+
+        let start = Instant::now();
+        for _ in 0..100_000 {
+            let _ = parse_ffmpeg_time(line);
+        }
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_secs() < 2,
+            "parse_ffmpeg_time took {:?} for 100k calls — regex is likely being recompiled \
+             per call instead of served from the LazyLock cache. Expected <2s with caching.",
+            elapsed
+        );
+    }
 }
