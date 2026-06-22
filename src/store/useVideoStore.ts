@@ -5,8 +5,8 @@ const initialSubtitleEdit: SubtitleEditState = {
   entries: [],
   isDirty: false,
   isBilingual: false,
-  primaryLanguage: 'English',
-  secondaryLanguage: 'Chinese',
+  primaryLanguage: 'Chinese',
+  secondaryLanguage: 'Portuguese',
   secondaryLanguagePosition: 'after',
   editedFilePath: null,
 }
@@ -51,7 +51,7 @@ interface VideoStore {
   setSubtitleSettings: (settings: Partial<SubtitleSettings>) => void
   setSubtitleEntries: (entries: SubtitleEntry[]) => void
   updateSubtitleEntry: (id: string, updates: Partial<Pick<SubtitleEntry, 'startTimeMs' | 'endTimeMs' | 'text' | 'bilingualText'>>) => void
-  addSubtitleEntry: (entry: SubtitleEntry) => void
+  addSubtitleEntry: (entry: SubtitleEntry, afterId?: string | null) => void
   removeSubtitleEntry: (id: string) => void
   setBilingualMode: (enabled: boolean) => void
   setPrimaryLanguage: (lang: string) => void
@@ -160,13 +160,38 @@ export const useVideoStore = create<VideoStore>((set) => ({
       isDirty: true,
     },
   })),
-  addSubtitleEntry: (entry) => set((state) => ({
-    subtitleEdit: {
-      ...state.subtitleEdit,
-      entries: [...state.subtitleEdit.entries, entry],
-      isDirty: true,
-    },
-  })),
+  addSubtitleEntry: (entry, afterId) => set((state) => {
+    const entries = state.subtitleEdit.entries
+    if (!afterId) {
+      return {
+        subtitleEdit: {
+          ...state.subtitleEdit,
+          entries: [...entries, entry],
+          isDirty: true,
+        },
+      }
+    }
+    const afterIdx = entries.findIndex(e => e.id === afterId)
+    if (afterIdx === -1) {
+      return {
+        subtitleEdit: {
+          ...state.subtitleEdit,
+          entries: [...entries, entry],
+          isDirty: true,
+        },
+      }
+    }
+    const newEntries = [...entries]
+    newEntries.splice(afterIdx + 1, 0, entry)
+    const reindexed = newEntries.map((e, i) => ({ ...e, index: i + 1 }))
+    return {
+      subtitleEdit: {
+        ...state.subtitleEdit,
+        entries: reindexed,
+        isDirty: true,
+      },
+    }
+  }),
   removeSubtitleEntry: (id) => set((state) => ({
     subtitleEdit: {
       ...state.subtitleEdit,
