@@ -2,6 +2,14 @@ import type { SubtitleEntry, SecondaryLanguagePosition } from '../types'
 
 const SRT_TIMESTAMP_RE = /^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})$/
 
+// Matches CJK Unified Ideographs, Extension A, Compatibility Ideographs,
+// Hiragana, Katakana, and Hangul Syllables.
+const CJK_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uF900-\uFAFF\u3040-\u30ff\uac00-\ud7af]/
+
+function isCJK(text: string): boolean {
+  return CJK_RE.test(text)
+}
+
 function srtTimeToMs(time: string): number {
   const match = SRT_TIMESTAMP_RE.exec(time.trim())
   if (!match) return 0
@@ -69,7 +77,13 @@ export function parseSrtTimeInput(input: string): number | null {
 }
 
 export function parseSrt(content: string): SubtitleEntry[] {
-  const entries: SubtitleEntry[] = []
+  const rawEntries: Array<{
+    id: string
+    index: number
+    startTimeMs: number
+    endTimeMs: number
+    textLines: string[]
+  }> = []
 
   const blocks = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split(/\n\n+/)
 
@@ -87,19 +101,45 @@ export function parseSrt(content: string): SubtitleEntry[] {
 
     const startTimeMs = srtTimeToMs(timeMatch[1])
     const endTimeMs = srtTimeToMs(timeMatch[2])
-    const text = lines.slice(2).join('\n')
+    const textLines = lines.slice(2)
 
-    entries.push({
+    rawEntries.push({
       id: crypto.randomUUID(),
       index,
       startTimeMs,
       endTimeMs,
-      text,
-      bilingualText: '',
+      textLines,
     })
   }
 
-  return entries
+  const isBilingualFile = rawEntries.some(
+    e => e.textLines.length >= 2 &&
+      e.textLines.some(l => isCJK(l)) &&
+      e.textLines.some(l => !isCJK(l))
+  )
+
+  return rawEntries.map(raw => {
+    if (isBilingualFile) {
+      const cjkLines = raw.textLines.filter(l => isCJK(l))
+      const nonCjkLines = raw.textLines.filter(l => !isCJK(l))
+      return {
+        id: raw.id,
+        index: raw.index,
+        startTimeMs: raw.startTimeMs,
+        endTimeMs: raw.endTimeMs,
+        text: cjkLines.join('\n'),
+        bilingualText: nonCjkLines.join('\n'),
+      }
+    }
+    return {
+      id: raw.id,
+      index: raw.index,
+      startTimeMs: raw.startTimeMs,
+      endTimeMs: raw.endTimeMs,
+      text: raw.textLines.join('\n'),
+      bilingualText: '',
+    }
+  })
 }
 
 export function serializeSrt(entries: SubtitleEntry[], bilingual: boolean = false, secondaryPosition: SecondaryLanguagePosition = 'after'): string {
@@ -109,9 +149,10 @@ export function serializeSrt(entries: SubtitleEntry[], bilingual: boolean = fals
       const start = msToSrtTime(entry.startTimeMs)
       const end = msToSrtTime(entry.endTimeMs)
       const textLines = bilingual && entry.bilingualText
-        ? secondaryPosition === 'before'
-          ? entry.bilingualText + '\n' + entry.text
-          : entry.text + '\n' + entry.bilingualText
+        ? (secondaryPosition === 'before'
+          ? [entry.bilingualText, entry.text]
+          : [entry.text, entry.bilingualText]
+        ).filter(Boolean).join('\n')
         : entry.text
       return `${index}\n${start} --> ${end}\n${textLines}`
     })
