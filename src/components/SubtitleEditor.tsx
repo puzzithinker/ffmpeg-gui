@@ -22,6 +22,7 @@ const SubtitleEditor: React.FC = () => {
 
   const [exporting, setExporting] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [currentEditingId, setCurrentEditingId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -32,6 +33,10 @@ const SubtitleEditor: React.FC = () => {
           const content = await tauriAPI.readSubtitleFile(subtitleFile.path)
           const entries = parseSrt(content)
           setSubtitleEntries(entries)
+          const hasBilingual = entries.some(e => e.bilingualText.trim() !== '')
+          if (hasBilingual) {
+            setBilingualMode(true)
+          }
         } catch {
           // Silently fail; user can load manually
         } finally {
@@ -40,7 +45,7 @@ const SubtitleEditor: React.FC = () => {
       }
     }
     loadSubtitle()
-  }, [subtitleFile, subtitleEdit.entries.length, setSubtitleEntries])
+  }, [subtitleFile, subtitleEdit.entries.length, setSubtitleEntries, setBilingualMode])
 
   const handleTimeChange = (id: string, field: 'startTimeMs' | 'endTimeMs', value: string) => {
     const ms = parseSrtTimeInput(value)
@@ -55,24 +60,42 @@ const SubtitleEditor: React.FC = () => {
 
   const handleAddEntry = () => {
     const entries = subtitleEdit.entries
-    let startTimeMs = 0
-    let endTimeMs = 5000
-    if (entries.length > 0) {
+    const currentIdx = currentEditingId
+      ? entries.findIndex(e => e.id === currentEditingId)
+      : -1
+
+    let startTimeMs: number
+    let endTimeMs: number
+    let afterId: string | null = null
+
+    if (currentIdx >= 0) {
+      const current = entries[currentIdx]
+      startTimeMs = current.endTimeMs
+      endTimeMs = startTimeMs + 5000
+      afterId = current.id
+    } else if (entries.length > 0) {
       const last = entries[entries.length - 1]
       startTimeMs = last.endTimeMs
       endTimeMs = startTimeMs + 5000
+    } else {
+      startTimeMs = 0
+      endTimeMs = 5000
     }
+
+    const newId = crypto.randomUUID()
     const newEntry: SubtitleEntry = {
-      id: crypto.randomUUID(),
-      index: entries.length + 1,
+      id: newId,
+      index: 0,
       startTimeMs,
       endTimeMs,
       text: '',
       bilingualText: '',
     }
-    addSubtitleEntry(newEntry)
+    addSubtitleEntry(newEntry, afterId)
+    setCurrentEditingId(newId)
     setTimeout(() => {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+      const el = scrollRef.current?.querySelector(`[data-entry-id="${newId}"]`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 50)
   }
 
@@ -191,7 +214,7 @@ const SubtitleEditor: React.FC = () => {
 
       <div ref={scrollRef} className="max-h-[500px] overflow-y-auto space-y-2 pr-1">
         {subtitleEdit.entries.map((entry, idx) => (
-          <div key={entry.id} className="border border-gray-200 rounded-md p-3 bg-gray-50">
+          <div key={entry.id} data-entry-id={entry.id} className="border border-gray-200 rounded-md p-3 bg-gray-50">
             <div className="flex items-start gap-3">
               <div className="flex flex-col items-center gap-1 pt-1">
                 <span className="text-xs font-medium text-gray-500 w-6 text-center">{entry.index}</span>
@@ -217,6 +240,7 @@ const SubtitleEditor: React.FC = () => {
                     type="text"
                     defaultValue={msToSrtTime(entry.startTimeMs)}
                     onBlur={(e) => handleTimeChange(entry.id, 'startTimeMs', e.target.value)}
+                    onFocus={() => setCurrentEditingId(entry.id)}
                     className="w-full px-2 py-1 border border-gray-300 rounded-md text-sm font-mono"
                   />
                 </div>
@@ -226,6 +250,7 @@ const SubtitleEditor: React.FC = () => {
                     type="text"
                     defaultValue={msToSrtTime(entry.endTimeMs)}
                     onBlur={(e) => handleTimeChange(entry.id, 'endTimeMs', e.target.value)}
+                    onFocus={() => setCurrentEditingId(entry.id)}
                     className="w-full px-2 py-1 border border-gray-300 rounded-md text-sm font-mono"
                   />
                 </div>
@@ -236,6 +261,7 @@ const SubtitleEditor: React.FC = () => {
                   <textarea
                     value={entry.text}
                     onChange={(e) => updateSubtitleEntry(entry.id, { text: e.target.value })}
+                    onFocus={() => setCurrentEditingId(entry.id)}
                     rows={2}
                     className="w-full px-2 py-1 border border-gray-300 rounded-md text-sm resize-none"
                   />
@@ -246,6 +272,7 @@ const SubtitleEditor: React.FC = () => {
                     <textarea
                       value={entry.bilingualText}
                       onChange={(e) => updateSubtitleEntry(entry.id, { bilingualText: e.target.value })}
+                      onFocus={() => setCurrentEditingId(entry.id)}
                       rows={2}
                       className="w-full px-2 py-1 border border-gray-300 rounded-md text-sm resize-none"
                     />
