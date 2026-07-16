@@ -1,10 +1,14 @@
 use crate::commands::apply_no_window;
-use crate::commands::process::monitor_ffmpeg_progress;
-use crate::commands::video::get_duration;
-use crate::state::{AppState, ProcessJob};
+use crate::commands::process::{
+    monitor_ffmpeg_progress, register_job, run_registered_ffmpeg, CompletePayload, ErrorPayload,
+};
+use crate::commands::video::{
+    get_duration, probe_stream_profile, profiles_compatible_for_copy, StreamProfile,
+};
+use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tokio::process::Command;
 use uuid::Uuid;
 
@@ -24,6 +28,9 @@ pub struct MultiCutMergeParams {
     pub crop_x: Option<u32>,
     pub crop_y: Option<u32>,
     pub crf: Option<u32>,
+    /// When true (default), prefer stream-copy cuts when no crop is applied.
+    /// Copy is keyframe-aligned; set false for frame-accurate re-encode.
+    pub prefer_copy: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +74,227 @@ pub async fn multi_cut_merge(
         }
     }
 
+    let has_crop = params.crop_width.is_some() && params.crop_height.is_some();
+    let prefer_copy = params.prefer_copy.unwrap_or(true);
+
+    // Quality-first: stream-copy segments + concat demuxer when no crop.
+    // Cuts are keyframe-aligned (not frame-accurate).
+    if prefer_copy && !has_crop {
+        return multi_cut_stream_copy(params, job_id, app, state.inner().clone()).await;
+    }
+
+    multi_cut_reencode(params, job_id, app, state.inner().clone()).await
+}
+
+async fn multi_cut_stream_copy(
+    params: MultiCutMergeParams,
+    job_id: Uuid,
+    app: AppHandle,
+    state: AppState,
+) -> Result<String, String> {
+    let work_dir = std::env::temp_dir().join(format!("ffmpeg_multicut_{}", job_id));
+    std::fs::create_dir_all(&work_dir)
+        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
+    // Placeholder so cancel_all / cancel by id finds this job before the first ffmpeg spawn.
+    {
+        let mut pids = state.job_pids.lock().await;
+        pids.insert(job_id, 0);
+    }
+
+    let total_duration: f64 = params
+        .segments
+        .iter()
+        .map(|s| s.end_time - s.start_time)
+        .sum();
+
+    let app_clone = app.clone();
+    let state_clone = state.clone();
+    let input = params.input_file.clone();
+    let output = params.output_file.clone();
+    let segments = params.segments.clone();
+
+    tokio::spawn(async move {
+        let result = run_multi_cut_copy_pipeline(
+            &input,
+            &output,
+            &segments,
+            job_id,
+            total_duration,
+            &work_dir,
+            app_clone.clone(),
+            state_clone.clone(),
+        )
+        .await;
+
+        // Cleanup work dir always
+        let _ = std::fs::remove_dir_all(&work_dir);
+
+        // Clear cancelled flag for this multi-step job
+        {
+            let mut cancelled = state_clone.cancelled_jobs.lock().await;
+            cancelled.remove(&job_id);
+        }
+
+        match result {
+            Ok(true) => {
+                let _ = app_clone.emit(
+                    "ffmpeg-complete",
+                    CompletePayload {
+                        job_id: job_id.to_string(),
+                    },
+                );
+            }
+            Ok(false) => {
+                // Cancelled — event already emitted by cancel_process
+                log::info!("multi_cut stream-copy job {} cancelled", job_id);
+            }
+            Err(e) => {
+                let _ = app_clone.emit(
+                    "ffmpeg-error",
+                    ErrorPayload {
+                        job_id: job_id.to_string(),
+                        error: e,
+                    },
+                );
+            }
+        }
+    });
+
+    Ok(job_id.to_string())
+}
+
+async fn run_multi_cut_copy_pipeline(
+    input: &str,
+    output: &str,
+    segments: &[Segment],
+    job_id: Uuid,
+    total_duration: f64,
+    work_dir: &Path,
+    app: AppHandle,
+    state: AppState,
+) -> Result<bool, String> {
+    let mut segment_files: Vec<String> = Vec::new();
+    let mut elapsed_before = 0.0_f64;
+
+    for (i, seg) in segments.iter().enumerate() {
+        if is_cancelled(&state, job_id).await {
+            return Ok(false);
+        }
+
+        let seg_path = work_dir.join(format!("seg_{:04}.mp4", i));
+        let seg_path_str = seg_path.to_string_lossy().to_string();
+        let dur = seg.end_time - seg.start_time;
+
+        // Input seek + stream copy — preserves original quality (keyframe-aligned).
+        let args = vec![
+            "-ss".to_string(),
+            seg.start_time.to_string(),
+            "-i".to_string(),
+            input.to_string(),
+            "-t".to_string(),
+            dur.to_string(),
+            "-c".to_string(),
+            "copy".to_string(),
+            "-avoid_negative_ts".to_string(),
+            "make_zero".to_string(),
+            "-y".to_string(),
+            seg_path_str.clone(),
+        ];
+
+        // Progress duration is total output; offset isn't supported in monitor, so use segment
+        // duration so percent still advances roughly.
+        let ok = run_registered_ffmpeg(
+            args,
+            job_id,
+            total_duration.max(dur),
+            app.clone(),
+            state.clone(),
+            None,
+            false, // intermediate — no complete/error
+        )
+        .await?;
+
+        if is_cancelled(&state, job_id).await {
+            return Ok(false);
+        }
+        if !ok {
+            return Err(format!(
+                "Failed to extract segment {} ({}s–{}s) with stream copy",
+                i + 1,
+                seg.start_time,
+                seg.end_time
+            ));
+        }
+
+        // Synthetic progress pulse between segments
+        let elapsed_before_next = elapsed_before + dur;
+        let percent = if total_duration > 0.0 {
+            (elapsed_before_next / total_duration * 95.0).min(95.0)
+        } else {
+            0.0
+        };
+        let _ = app.emit(
+            "ffmpeg-progress",
+            crate::commands::process::ProgressPayload {
+                job_id: job_id.to_string(),
+                seconds: elapsed_before_next,
+                percent,
+            },
+        );
+        elapsed_before = elapsed_before_next;
+
+        segment_files.push(seg_path_str);
+    }
+
+    if is_cancelled(&state, job_id).await {
+        return Ok(false);
+    }
+
+    let list_path = work_dir.join("concat_list.txt");
+    write_concat_list(&list_path, &segment_files)
+        .map_err(|e| format!("Failed to write concat list: {}", e))?;
+
+    let args = vec![
+        "-f".to_string(),
+        "concat".to_string(),
+        "-safe".to_string(),
+        "0".to_string(),
+        "-i".to_string(),
+        list_path.to_string_lossy().to_string(),
+        "-c".to_string(),
+        "copy".to_string(),
+        "-y".to_string(),
+        output.to_string(),
+    ];
+
+    let ok = run_registered_ffmpeg(
+        args,
+        job_id,
+        total_duration.max(1.0),
+        app,
+        state.clone(),
+        None,
+        false,
+    )
+    .await?;
+
+    if is_cancelled(&state, job_id).await {
+        return Ok(false);
+    }
+    if !ok {
+        return Err("Failed to concat stream-copied segments".to_string());
+    }
+
+    Ok(true)
+}
+
+async fn multi_cut_reencode(
+    params: MultiCutMergeParams,
+    job_id: Uuid,
+    app: AppHandle,
+    state: AppState,
+) -> Result<String, String> {
     let has_audio = check_audio_stream(&params.input_file).await;
 
     let n = params.segments.len();
@@ -108,7 +336,6 @@ pub async fn multi_cut_merge(
 
     let filter_complex = filters.join(";");
 
-    // Build args
     let mut args = vec![
         "-i".to_string(),
         params.input_file.clone(),
@@ -135,10 +362,13 @@ pub async fn multi_cut_merge(
     args.push("-y".to_string());
     args.push(params.output_file.clone());
 
-    log::info!("multi_cut_merge: ffmpeg args: {:?}", args);
+    log::info!("multi_cut_merge reencode: ffmpeg args: {:?}", args);
 
     let mut command = Command::new("ffmpeg");
-    command.args(&args).stderr(std::process::Stdio::piped());
+    command
+        .args(&args)
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null());
 
     apply_no_window(&mut command);
 
@@ -151,12 +381,8 @@ pub async fn multi_cut_merge(
         .take()
         .ok_or_else(|| "Failed to capture ffmpeg stderr".to_string())?;
 
-    {
-        let mut jobs = state.active_jobs.lock().await;
-        jobs.insert(job_id, ProcessJob { child, job_id });
-    }
+    register_job(&state, job_id, child).await?;
 
-    // Total duration = sum of segment durations
     let total_duration: f64 = params
         .segments
         .iter()
@@ -164,9 +390,10 @@ pub async fn multi_cut_merge(
         .sum();
 
     let app_clone = app.clone();
-    let state_clone = state.inner().clone();
+    let state_clone = state.clone();
     tokio::spawn(async move {
-        monitor_ffmpeg_progress(stderr, job_id, total_duration, app_clone, state_clone, None).await;
+        monitor_ffmpeg_progress(stderr, job_id, total_duration, app_clone, state_clone, None, true)
+            .await;
     });
 
     Ok(job_id.to_string())
@@ -201,51 +428,103 @@ pub async fn merge_videos(
         ));
     }
 
-    // Check if ALL input files have audio
-    let mut all_have_audio = true;
+    // Probe all inputs for stream-copy eligibility (quality-first).
+    let mut profiles: Vec<StreamProfile> = Vec::new();
     for file in &params.input_files {
-        if !check_audio_stream(file).await {
-            all_have_audio = false;
-            break;
+        match probe_stream_profile(file).await {
+            Ok(p) => profiles.push(p),
+            Err(e) => {
+                log::warn!(
+                    "Could not probe {}: {} — falling back to re-encode",
+                    file,
+                    e
+                );
+                profiles.clear();
+                break;
+            }
         }
     }
 
-    // Use the concat DEMUXER instead of the concat FILTER. The filter holds frames for all N
-    // inputs in RAM simultaneously (O(N) memory — an OOM / hard-reset vector when merging many
-    // large files). The demuxer streams inputs sequentially (O(1) memory). Resolution/audio
-    // normalisation is applied on the single output stream via -vf/-af.
+    let can_copy = !profiles.is_empty() && profiles_compatible_for_copy(&profiles);
+    log::info!(
+        "merge_videos: stream-copy eligible = {} ({} inputs)",
+        can_copy,
+        params.input_files.len()
+    );
+
     let list_path = std::env::temp_dir().join(format!("ffmpeg_concat_list_{}.txt", job_id));
     write_concat_list(&list_path, &params.input_files)
         .map_err(|e| format!("Failed to write concat list: {}", e))?;
 
-    let mut args: Vec<String> = vec![
-        "-f".to_string(), "concat".to_string(),
-        "-safe".to_string(), "0".to_string(),
-        "-i".to_string(), list_path.to_string_lossy().to_string(),
-        "-vf".to_string(),
-        "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30".to_string(),
-        "-c:v".to_string(), "libx264".to_string(),
-    ];
-    let crf_value = params.crf.unwrap_or(18);
-    args.push("-crf".to_string());
-    args.push(crf_value.to_string());
-
-    if all_have_audio {
-        args.push("-af".to_string());
-        args.push("aresample=44100".to_string());
-        args.push("-c:a".to_string());
-        args.push("aac".to_string());
+    let args = if can_copy {
+        // Preserve original quality — concat demuxer + stream copy.
+        vec![
+            "-f".to_string(),
+            "concat".to_string(),
+            "-safe".to_string(),
+            "0".to_string(),
+            "-i".to_string(),
+            list_path.to_string_lossy().to_string(),
+            "-c".to_string(),
+            "copy".to_string(),
+            "-y".to_string(),
+            params.output_file.clone(),
+        ]
     } else {
-        args.push("-an".to_string());
-    }
+        // Incompatible streams — re-encode. Prefer first file's resolution when known;
+        // fall back to 1920x1080. Keep source fps when possible (no forced fps=30).
+        let (tw, th) = profiles
+            .first()
+            .map(|p| (p.width.max(1), p.height.max(1)))
+            .unwrap_or((1920, 1080));
 
-    args.push("-y".to_string());
-    args.push(params.output_file.clone());
+        let mut all_have_audio = true;
+        for file in &params.input_files {
+            if !check_audio_stream(file).await {
+                all_have_audio = false;
+                break;
+            }
+        }
+
+        let mut args: Vec<String> = vec![
+            "-f".to_string(),
+            "concat".to_string(),
+            "-safe".to_string(),
+            "0".to_string(),
+            "-i".to_string(),
+            list_path.to_string_lossy().to_string(),
+            "-vf".to_string(),
+            format!(
+                "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1",
+                w = tw,
+                h = th
+            ),
+            "-c:v".to_string(),
+            "libx264".to_string(),
+        ];
+        let crf_value = params.crf.unwrap_or(18);
+        args.push("-crf".to_string());
+        args.push(crf_value.to_string());
+
+        if all_have_audio {
+            args.push("-c:a".to_string());
+            args.push("aac".to_string());
+        } else {
+            args.push("-an".to_string());
+        }
+
+        args.push("-y".to_string());
+        args.push(params.output_file.clone());
+        args
+    };
 
     log::info!("merge_videos: ffmpeg args: {:?}", args);
 
     let mut command = Command::new("ffmpeg");
-    command.args(&args).stderr(std::process::Stdio::piped());
+    command
+        .args(&args)
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null());
 
     apply_no_window(&mut command);
 
@@ -258,10 +537,7 @@ pub async fn merge_videos(
         .take()
         .ok_or_else(|| "Failed to capture ffmpeg stderr".to_string())?;
 
-    {
-        let mut jobs = state.active_jobs.lock().await;
-        jobs.insert(job_id, ProcessJob { child, job_id });
-    }
+    register_job(state.inner(), job_id, child).await?;
 
     // Total duration = sum of all input durations
     let mut total_duration: f64 = 0.0;
@@ -276,10 +552,24 @@ pub async fn merge_videos(
     let state_clone = state.inner().clone();
     let cleanup = list_path.clone();
     tokio::spawn(async move {
-        monitor_ffmpeg_progress(stderr, job_id, total_duration, app_clone, state_clone, Some(cleanup)).await;
+        monitor_ffmpeg_progress(
+            stderr,
+            job_id,
+            total_duration,
+            app_clone,
+            state_clone,
+            Some(cleanup),
+            true,
+        )
+        .await;
     });
 
     Ok(job_id.to_string())
+}
+
+async fn is_cancelled(state: &AppState, job_id: Uuid) -> bool {
+    let cancelled = state.cancelled_jobs.lock().await;
+    cancelled.contains(&job_id)
 }
 
 /// Write an ffmpeg concat demuxer list file. Paths are single-quoted with `'` escaped as `'\''`;
@@ -317,5 +607,27 @@ async fn check_audio_stream(file_path: &str) -> bool {
             log::warn!("Could not probe audio for {}, assuming no audio", file_path);
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_concat_list_escapes_quotes_and_backslashes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("list.txt");
+        write_concat_list(
+            &path,
+            &[
+                r"C:\Videos\file.mp4".to_string(),
+                r"D:\My Videos\O'Brien.mp4".to_string(),
+            ],
+        )
+        .unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("file 'C:/Videos/file.mp4'"));
+        assert!(content.contains("file 'D:/My Videos/O'\\''Brien.mp4'"));
     }
 }

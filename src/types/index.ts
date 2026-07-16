@@ -72,6 +72,8 @@ export interface MultiCutMergeParams {
   cropX?: number
   cropY?: number
   crf?: number
+  /** Prefer stream-copy (keyframe) cuts when no crop. Default true. */
+  preferCopy?: boolean
 }
 
 export interface MergeVideosParams {

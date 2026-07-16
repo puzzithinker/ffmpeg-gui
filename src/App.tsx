@@ -54,13 +54,22 @@ function App() {
           }
 
           try {
-            await tauriAPI.cancelProcess(currentJobId)
+            if (currentJobId) {
+              await tauriAPI.cancelProcess(currentJobId)
+            } else {
+              await tauriAPI.cancelAllProcesses()
+            }
             setCurrentJobId(null)
             setProcessing(false)
             setProcessingProgress(null)
             await logger.log(`[App] Processing cancelled during close for job=${currentJobId}`)
           } catch (error) {
             console.error('Failed to cancel process:', error)
+            try {
+              await tauriAPI.cancelAllProcesses()
+            } catch {
+              // ignore
+            }
             await logger.error('[App] Failed to cancel during close', error)
           }
         }

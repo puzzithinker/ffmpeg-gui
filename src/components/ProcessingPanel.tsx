@@ -249,12 +249,32 @@ const ProcessingPanel: React.FC = () => {
   }
 
   const handleCancel = async () => {
-    if (currentJobId) {
-      try {
-        await tauriAPI.cancelProcess(currentJobId)
-      } catch (error) {
-        setError(`Failed to cancel processing: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    // Never no-op: job id may still be null between setProcessing(true) and invoke return.
+    const state = useVideoStore.getState()
+    const jobId = state.currentJobId
+
+    try {
+      if (jobId) {
+        await tauriAPI.cancelProcess(jobId)
+      } else {
+        await tauriAPI.cancelAllProcesses()
       }
+      // Optimistically clear UI; ffmpeg-cancelled will also clear if it arrives first.
+      state.setProcessing(false)
+      state.setProcessingProgress(null)
+      state.setCurrentJobId(null)
+      state.setError(null)
+    } catch (error) {
+      // Last resort: still try cancel-all so a stale id cannot leave ffmpeg running.
+      try {
+        await tauriAPI.cancelAllProcesses()
+        state.setProcessing(false)
+        state.setProcessingProgress(null)
+        state.setCurrentJobId(null)
+      } catch {
+        // ignore secondary failure
+      }
+      setError(`Failed to cancel processing: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
@@ -378,7 +398,15 @@ const ProcessingPanel: React.FC = () => {
             <div>
               <p className="text-xs uppercase tracking-wide text-gray-500">Quality</p>
               <p className="font-medium">
-                {qualitySettings.mode === 'copy' && !hasFilters ? 'Exact copy' : `Re-encode (CRF ${qualitySettings.crf})`}
+                {mode === 'merge'
+                  ? 'Stream copy when sources match; re-encode only if needed'
+                  : mode === 'multi-cut'
+                    ? (cropSettings.enabled
+                        ? `Frame-accurate re-encode (CRF ${qualitySettings.crf})`
+                        : 'Exact copy (keyframe cuts)')
+                    : qualitySettings.mode === 'copy' && !hasFilters
+                      ? 'Exact copy'
+                      : `Re-encode (CRF ${qualitySettings.crf})`}
               </p>
             </div>
           </div>
@@ -420,12 +448,26 @@ const ProcessingPanel: React.FC = () => {
                 Filters require re-encoding. Switching to custom quality mode.
               </p>
             )}
-            {qualitySettings.mode === 'copy' && !hasFilters && (
+            {mode === 'trim' && qualitySettings.mode === 'copy' && !hasFilters && (
               <p className="text-xs text-gray-500">
                 Fastest. Preserves original quality exactly.
               </p>
             )}
-            {qualitySettings.mode === 'reencode' && (
+            {mode === 'multi-cut' && !cropSettings.enabled && (
+              <p className="text-xs text-gray-500">
+                Stream-copies each segment (original quality). Cuts align to keyframes.
+                Enable crop for frame-accurate re-encode.
+              </p>
+            )}
+            {mode === 'merge' && (
+              <p className="text-xs text-gray-500">
+                Identical sources are joined with stream copy (no quality loss).
+                Mismatched resolution/codec falls back to high-quality re-encode.
+              </p>
+            )}
+            {((mode === 'trim' && qualitySettings.mode === 'reencode')
+              || (mode === 'multi-cut' && cropSettings.enabled)
+              || mode === 'merge') && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-700">CRF: {qualitySettings.crf}</span>

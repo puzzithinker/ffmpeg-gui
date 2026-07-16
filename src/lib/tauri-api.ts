@@ -128,6 +128,11 @@ export const tauriAPI = {
     return await invoke<void>('cancel_process', { jobId });
   },
 
+  /** Kill every active ffmpeg job (used when UI is processing but job id is not set yet). */
+  cancelAllProcesses: async (): Promise<number> => {
+    return await invoke<number>('cancel_all_processes');
+  },
+
   // Event listeners
   onFFmpegProgress: (callback: (event: ProgressEvent) => void) => {
     return listen<ProgressEvent>('ffmpeg-progress', (event) => {
@@ -172,6 +177,7 @@ export const tauriAPI = {
         crop_x: params.cropX,
         crop_y: params.cropY,
         crf: params.crf,
+        prefer_copy: params.preferCopy ?? true,
       },
     });
   },

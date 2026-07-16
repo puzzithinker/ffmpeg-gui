@@ -1,7 +1,8 @@
-use crate::commands::apply_no_window;
+use crate::commands::{apply_no_window, kill_process_tree};
 use crate::state::{AppState, ProcessJob};
 use std::collections::VecDeque;
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -94,7 +95,8 @@ pub async fn process_video(
     command
         .args(&args)
         .stderr(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped());
+        // Progress is on stderr; leave stdout unconnected so a full pipe cannot stall ffmpeg.
+        .stdout(std::process::Stdio::null());
 
     apply_no_window(&mut command);
 
@@ -106,17 +108,7 @@ pub async fn process_video(
     let stderr = child.stderr.take()
         .ok_or_else(|| "Failed to capture ffmpeg stderr".to_string())?;
 
-    // Store child process in state
-    {
-        let mut jobs = state.active_jobs.lock().await;
-        jobs.insert(
-            job_id,
-            ProcessJob {
-                child,
-                job_id,
-            },
-        );
-    }
+    register_job(&state, job_id, child).await?;
 
     // Calculate total duration for progress percentage
     let duration = params.end_time.unwrap_or(0.0) - params.start_time.unwrap_or(0.0);
@@ -125,12 +117,108 @@ pub async fn process_video(
     let app_clone = app.clone();
     let state_clone = state.inner().clone();
     tokio::spawn(async move {
-        monitor_ffmpeg_progress(stderr, job_id, duration, app_clone, state_clone, None).await;
+        monitor_ffmpeg_progress(stderr, job_id, duration, app_clone, state_clone, None, true).await;
     });
 
     Ok(job_id.to_string())
 }
 
+/// Register a spawned child in both the live-job map and the PID registry so cancel can kill
+/// the process even after the monitor takes the Child for wait.
+pub async fn register_job(
+    state: &AppState,
+    job_id: Uuid,
+    mut child: tokio::process::Child,
+) -> Result<(), String> {
+    let pid = child
+        .id()
+        .ok_or_else(|| "Failed to get ffmpeg process id".to_string())?;
+
+    // If the user hit Stop before this process was spawned (multi-step jobs), kill immediately.
+    let already_cancelled = {
+        let cancelled = state.cancelled_jobs.lock().await;
+        cancelled.contains(&job_id)
+    };
+    let cancelled = Arc::new(AtomicBool::new(already_cancelled));
+
+    if already_cancelled {
+        log::info!(
+            "Job {} was already cancelled; killing freshly spawned pid {}",
+            job_id,
+            pid
+        );
+        let _ = child.start_kill();
+        let _ = kill_process_tree(pid);
+    }
+
+    {
+        let mut jobs = state.active_jobs.lock().await;
+        jobs.insert(
+            job_id,
+            ProcessJob {
+                child,
+                job_id,
+                pid,
+                cancelled: cancelled.clone(),
+            },
+        );
+    }
+    {
+        let mut pids = state.job_pids.lock().await;
+        pids.insert(job_id, pid);
+    }
+
+    log::info!("Registered job {} with pid {}", job_id, pid);
+    Ok(())
+}
+
+/// Spawn ffmpeg, register it under `job_id`, stream progress, and wait for exit.
+/// When `emit_lifecycle` is false, does not emit complete/error (used for intermediate
+/// multi-cut segment extracts); cancel still works via the shared job registry.
+pub async fn run_registered_ffmpeg(
+    args: Vec<String>,
+    job_id: Uuid,
+    duration: f64,
+    app: AppHandle,
+    state: AppState,
+    cleanup_path: Option<PathBuf>,
+    emit_lifecycle: bool,
+) -> Result<bool, String> {
+    log::info!("run_registered_ffmpeg job {} args: {:?}", job_id, args);
+
+    let mut command = Command::new("ffmpeg");
+    command
+        .args(&args)
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null());
+    apply_no_window(&mut command);
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to spawn ffmpeg: {}", e))?;
+
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Failed to capture ffmpeg stderr".to_string())?;
+
+    register_job(&state, job_id, child).await?;
+
+    let success = monitor_ffmpeg_progress(
+        stderr,
+        job_id,
+        duration,
+        app,
+        state,
+        cleanup_path,
+        emit_lifecycle,
+    )
+    .await;
+
+    Ok(success)
+}
+
+/// Returns true if the process exited successfully and was not cancelled.
 pub async fn monitor_ffmpeg_progress(
     stderr: impl tokio::io::AsyncRead + Unpin,
     job_id: Uuid,
@@ -138,22 +226,26 @@ pub async fn monitor_ffmpeg_progress(
     app: AppHandle,
     state: AppState,
     cleanup_path: Option<PathBuf>,
-) {
+    emit_lifecycle: bool,
+) -> bool {
     let mut reader = BufReader::new(stderr);
     let mut buf = [0u8; 2048];
     let mut pending = String::new();
     let mut stderr_tail: VecDeque<String> = VecDeque::with_capacity(50);
 
-    // Throttle progress emission: emit at most every 200 ms or on every 1% delta, whichever
-    // comes first. Without this, high-frequency ffmpeg stderr floods the renderer with events
-    // that trigger per-event disk logging + WebView2 re-renders — a GPU TDR / hard-reset vector.
+    // Throttle progress emission to at most every 200 ms (≤5 Hz). Require the interval so
+    // fast encodes cannot flood WebView2 when percent jumps by ≥1% inside the window.
     let mut last_emit: Option<Instant> = None;
     let mut last_percent: f64 = -1.0;
     const MIN_INTERVAL: Duration = Duration::from_millis(200);
-    const MIN_DELTA: f64 = 1.0;
 
     while let Ok(bytes_read) = reader.read(&mut buf).await {
         if bytes_read == 0 {
+            break;
+        }
+
+        // Stop reading promptly after cancel so we can reap the child.
+        if is_job_cancelled(&state, job_id).await {
             break;
         }
 
@@ -183,10 +275,13 @@ pub async fn monitor_ffmpeg_progress(
                         let percent = calculate_progress_percentage(current_seconds, duration);
 
                         let now = Instant::now();
+                        // Hard cap at 5 Hz so fast encodes cannot flood WebView2.
                         let time_ok = last_emit.map_or(true, |t| now.duration_since(t) >= MIN_INTERVAL);
-                        let delta_ok = (percent - last_percent).abs() >= MIN_DELTA;
+                        let changed = last_emit.is_none()
+                            || (percent - last_percent).abs() >= 0.05
+                            || percent >= 100.0;
 
-                        if time_ok || delta_ok {
+                        if time_ok && changed {
                             let _ = app.emit(
                                 "ffmpeg-progress",
                                 ProgressPayload {
@@ -206,85 +301,200 @@ pub async fn monitor_ffmpeg_progress(
         }
     }
 
+    let was_cancelled = is_job_cancelled(&state, job_id).await;
+
     // Take the job out of the map under the lock, then DROP the lock before waiting.
     // Holding the mutex across `child.wait().await` serialises every other job operation
     // (including cancellation of unrelated jobs) for the entire remaining process duration.
+    // Cancel does NOT remove the Child — it only signals + kills by PID / start_kill — so
+    // the monitor always owns reaping.
     let job = {
         let mut jobs = state.active_jobs.lock().await;
         jobs.remove(&job_id)
     };
 
+    let mut success = false;
+
     if let Some(mut job) = job {
+        // If cancelled but process still alive, ensure kill before wait.
+        if was_cancelled || job.cancelled.load(Ordering::SeqCst) {
+            let _ = job.child.start_kill();
+        }
+
         match job.child.wait().await {
             Ok(status) => {
-                if status.success() {
-                    let _ = app.emit(
-                        "ffmpeg-complete",
-                        CompletePayload {
-                            job_id: job_id.to_string(),
-                        },
+                if was_cancelled || job.cancelled.load(Ordering::SeqCst) {
+                    // Cancel already emitted ffmpeg-cancelled; do not also emit complete/error.
+                    log::info!(
+                        "Job {} reaped after cancel (status {:?})",
+                        job_id,
+                        status.code()
                     );
+                    success = false;
+                } else if status.success() {
+                    success = true;
+                    if emit_lifecycle {
+                        let _ = app.emit(
+                            "ffmpeg-complete",
+                            CompletePayload {
+                                job_id: job_id.to_string(),
+                            },
+                        );
+                    }
                 } else {
-                    let stderr_text = if stderr_tail.is_empty() {
-                        "No stderr captured".to_string()
-                    } else {
-                        stderr_tail.iter().cloned().collect::<Vec<_>>().join("\n")
-                    };
+                    success = false;
+                    if emit_lifecycle {
+                        let stderr_text = if stderr_tail.is_empty() {
+                            "No stderr captured".to_string()
+                        } else {
+                            stderr_tail.iter().cloned().collect::<Vec<_>>().join("\n")
+                        };
 
+                        let _ = app.emit(
+                            "ffmpeg-error",
+                            ErrorPayload {
+                                job_id: job_id.to_string(),
+                                error: format!(
+                                    "FFmpeg exited with code {:?}. Stderr:\n{}",
+                                    status.code(),
+                                    stderr_text
+                                ),
+                            },
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                success = false;
+                if !was_cancelled && emit_lifecycle {
                     let _ = app.emit(
                         "ffmpeg-error",
                         ErrorPayload {
                             job_id: job_id.to_string(),
-                            error: format!(
-                                "FFmpeg exited with code {:?}. Stderr:\n{}",
-                                status.code(),
-                                stderr_text
-                            ),
+                            error: format!("Process error: {}", e),
                         },
                     );
                 }
             }
-            Err(e) => {
-                let _ = app.emit(
-                    "ffmpeg-error",
-                    ErrorPayload {
-                        job_id: job_id.to_string(),
-                        error: format!("Process error: {}", e),
-                    },
-                );
-            }
         }
+    } else if was_cancelled {
+        log::info!(
+            "Job {} already removed from map after cancel; pid kill should have reaped it",
+            job_id
+        );
+        success = false;
+    }
+
+    // Drop PID registry entry once this process is reaped. Keep cancelled_jobs until the
+    // outer multi-step job finishes (or until single-shot lifecycle ends with emit_lifecycle).
+    {
+        let mut pids = state.job_pids.lock().await;
+        pids.remove(&job_id);
+    }
+    if emit_lifecycle {
+        let mut cancelled = state.cancelled_jobs.lock().await;
+        cancelled.remove(&job_id);
     }
 
     if let Some(path) = cleanup_path {
         let _ = std::fs::remove_file(&path);
     }
+
+    success
 }
 
+async fn is_job_cancelled(state: &AppState, job_id: Uuid) -> bool {
+    let cancelled = state.cancelled_jobs.lock().await;
+    cancelled.contains(&job_id)
+}
+
+/// Kill a single job by id. Always attempts PID tree kill so this works even if the monitor
+/// already took the Child out of `active_jobs` for wait.
 #[tauri::command]
 pub async fn cancel_process(job_id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let uuid = Uuid::parse_str(&job_id).map_err(|_| "Invalid job ID".to_string())?;
+    cancel_job_inner(uuid, &app, state.inner()).await
+}
 
-    let mut jobs = state.active_jobs.lock().await;
+/// Kill every active job. Used when the UI has `isProcessing` but no job id yet (race between
+/// Start and the first progress event / invoke return).
+#[tauri::command]
+pub async fn cancel_all_processes(app: AppHandle, state: State<'_, AppState>) -> Result<u32, String> {
+    let ids: Vec<Uuid> = {
+        let pids = state.job_pids.lock().await;
+        pids.keys().copied().collect()
+    };
 
-    if let Some(mut job) = jobs.remove(&uuid) {
-        job.child
-            .kill()
-            .await
-            .map_err(|e| format!("Failed to kill process: {}", e))?;
-
-        // Emit cancelled event
-        let _ = app.emit(
-            "ffmpeg-cancelled",
-            CompletePayload {
-                job_id: job_id.to_string(),
-            },
-        );
-
-        Ok(())
-    } else {
-        Err("Job not found".to_string())
+    if ids.is_empty() {
+        // Still try active_jobs in case pid registry is empty but a child exists.
+        let ids_from_jobs: Vec<Uuid> = {
+            let jobs = state.active_jobs.lock().await;
+            jobs.keys().copied().collect()
+        };
+        if ids_from_jobs.is_empty() {
+            return Ok(0);
+        }
+        for id in ids_from_jobs {
+            let _ = cancel_job_inner(id, &app, state.inner()).await;
+        }
+        return Ok(1);
     }
+
+    let count = ids.len() as u32;
+    for id in ids {
+        let _ = cancel_job_inner(id, &app, state.inner()).await;
+    }
+    Ok(count)
+}
+
+async fn cancel_job_inner(uuid: Uuid, app: &AppHandle, state: &AppState) -> Result<(), String> {
+    // Mark cancelled first so the monitor suppresses complete/error events.
+    {
+        let mut cancelled = state.cancelled_jobs.lock().await;
+        cancelled.insert(uuid);
+    }
+
+    // Prefer start_kill on the live Child if still in the map (do NOT remove — monitor reaps).
+    let pid_from_child = {
+        let mut jobs = state.active_jobs.lock().await;
+        if let Some(job) = jobs.get_mut(&uuid) {
+            job.cancelled.store(true, Ordering::SeqCst);
+            let pid = job.pid;
+            if let Err(e) = job.child.start_kill() {
+                log::warn!("start_kill failed for job {}: {}", uuid, e);
+            } else {
+                log::info!("start_kill issued for job {} pid {}", uuid, pid);
+            }
+            Some(pid)
+        } else {
+            None
+        }
+    };
+
+    // Always kill by PID (process tree) — works after Child was taken for wait, and covers
+    // cases where start_kill failed or only killed a wrapper.
+    let pid = {
+        let pids = state.job_pids.lock().await;
+        pids.get(&uuid).copied().or(pid_from_child)
+    };
+
+    if let Some(pid) = pid {
+        if let Err(e) = kill_process_tree(pid) {
+            log::warn!("kill_process_tree failed for job {} pid {}: {}", uuid, pid, e);
+        }
+    } else {
+        // No pid and no child — job already finished. Still emit cancelled so UI clears.
+        log::warn!("cancel_job_inner: no pid/child for job {} (may already have exited)", uuid);
+    }
+
+    let _ = app.emit(
+        "ffmpeg-cancelled",
+        CompletePayload {
+            job_id: uuid.to_string(),
+        },
+    );
+
+    Ok(())
 }
 
 fn validate_inputs(params: &ProcessVideoParams) -> Result<(), String> {
@@ -368,8 +578,10 @@ fn build_ffmpeg_args(params: &ProcessVideoParams) -> Result<Vec<String>, String>
         }
 
         if let Some(brightness) = params.brightness {
-            if brightness.abs() > 0.001 {
-                filters.push(format!("eq=brightness={}", brightness));
+            // UI slider is −100…100 (%); FFmpeg eq brightness expects roughly −1.0…1.0.
+            let normalized = normalize_brightness(brightness);
+            if normalized.abs() > 0.001 {
+                filters.push(format!("eq=brightness={}", normalized));
             }
         }
 
@@ -412,6 +624,16 @@ fn build_ffmpeg_args(params: &ProcessVideoParams) -> Result<Vec<String>, String>
     }
 
     Ok(args)
+}
+
+/// Map UI brightness (−100…100) to FFmpeg `eq=brightness` (−1.0…1.0).
+/// Values already in the −1…1 range are left as-is (for callers that pre-normalize).
+pub fn normalize_brightness(value: f64) -> f64 {
+    if value.abs() > 1.0 {
+        (value / 100.0).clamp(-1.0, 1.0)
+    } else {
+        value.clamp(-1.0, 1.0)
+    }
 }
 
 // FFmpeg's filter syntax treats ':' as an option separator and '\' as an escape character.
@@ -1079,6 +1301,43 @@ mod tests {
         assert!(args.contains(&"libx264".to_string()));
         let crf_idx = args.iter().position(|x| x == "-crf").unwrap();
         assert_eq!(args[crf_idx + 1], "18");
+    }
+
+    #[test]
+    fn test_normalize_brightness_percent_scale() {
+        assert!((normalize_brightness(50.0) - 0.5).abs() < 1e-9);
+        assert!((normalize_brightness(-100.0) - (-1.0)).abs() < 1e-9);
+        assert!((normalize_brightness(100.0) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_normalize_brightness_already_unit_range() {
+        assert!((normalize_brightness(0.5) - 0.5).abs() < 1e-9);
+        assert!((normalize_brightness(-0.25) - (-0.25)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_build_ffmpeg_args_brightness_percent_normalized() {
+        let params = ProcessVideoParams {
+            input_file: "/input/video.mp4".to_string(),
+            output_file: "/output/video.mp4".to_string(),
+            start_time: None,
+            end_time: None,
+            subtitle_file: None,
+            subtitle_font: None,
+            subtitle_font_size: None,
+            brightness: Some(50.0),
+            crop_width: None,
+            crop_height: None,
+            crop_x: None,
+            crop_y: None,
+            quality_mode: None,
+            crf: None,
+        };
+
+        let args = build_ffmpeg_args(&params).unwrap();
+        let vf_idx = args.iter().position(|x| x == "-vf").unwrap();
+        assert!(args[vf_idx + 1].contains("eq=brightness=0.5"));
     }
 
     // Regression guard for the LazyLock regex cache fix (hard-reset vector #1). If a future

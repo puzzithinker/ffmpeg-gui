@@ -7,32 +7,51 @@ import { tauriAPI } from '../lib/tauri-api';
 vi.mock('../store/useVideoStore');
 vi.mock('../lib/tauri-api');
 
-describe('ProcessingPanel', () => {
-  const mockSetError = vi.fn();
-  const mockSetProcessing = vi.fn();
-  const mockSetProcessingProgress = vi.fn();
-  const mockSetCurrentJobId = vi.fn();
+const baseStore = {
+  mode: 'trim' as const,
+  videoFile: null as any,
+  subtitleFile: null,
+  trimSettings: { startTime: 0, endTime: 0 },
+  brightness: 0,
+  cropSettings: { enabled: false, width: 1920, height: 1080, x: 0, y: 0 },
+  subtitleSettings: { font: '', fontSize: 24, fontSizeAuto: true },
+  subtitleEdit: {
+    entries: [],
+    isDirty: false,
+    isBilingual: false,
+    primaryLanguage: 'Chinese',
+    secondaryLanguage: 'Portuguese',
+    secondaryLanguagePosition: 'after' as const,
+    editedFilePath: null,
+  },
+  segments: [],
+  mergeVideoFiles: [],
+  isProcessing: false,
+  processingProgress: null as any,
+  currentJobId: null as string | null,
+  qualitySettings: { mode: 'copy' as const, crf: 18 },
+  setError: vi.fn(),
+  setProcessing: vi.fn(),
+  setProcessingProgress: vi.fn(),
+  setCurrentJobId: vi.fn(),
+  setQualitySettings: vi.fn(),
+};
 
+describe('ProcessingPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(tauriAPI.onFFmpegProgress).mockResolvedValue(() => {});
     vi.mocked(tauriAPI.onFFmpegComplete).mockResolvedValue(() => {});
     vi.mocked(tauriAPI.onFFmpegError).mockResolvedValue(() => {});
     vi.mocked(tauriAPI.onFFmpegCancelled).mockResolvedValue(() => {});
+    // getState used by cancel handler and progress listeners
+    (useVideoStore as any).getState = vi.fn(() => baseStore);
   });
 
   it('should disable process button when no video file', () => {
     vi.mocked(useVideoStore).mockReturnValue({
+      ...baseStore,
       videoFile: null,
-      subtitleFile: null,
-      trimSettings: { startTime: 0, endTime: 0 },
-      isProcessing: false,
-      processingProgress: null,
-      setError: mockSetError,
-      setProcessing: mockSetProcessing,
-      setProcessingProgress: mockSetProcessingProgress,
-      currentJobId: null,
-      setCurrentJobId: mockSetCurrentJobId,
     } as any);
 
     render(<ProcessingPanel />);
@@ -42,16 +61,9 @@ describe('ProcessingPanel', () => {
 
   it('should show select output button initially', () => {
     vi.mocked(useVideoStore).mockReturnValue({
+      ...baseStore,
       videoFile: { path: '/test.mp4', name: 'test.mp4', duration: 100 },
-      subtitleFile: null,
       trimSettings: { startTime: 0, endTime: 100 },
-      isProcessing: false,
-      processingProgress: null,
-      setError: mockSetError,
-      setProcessing: mockSetProcessing,
-      setProcessingProgress: mockSetProcessingProgress,
-      currentJobId: null,
-      setCurrentJobId: mockSetCurrentJobId,
     } as any);
 
     render(<ProcessingPanel />);
@@ -60,36 +72,28 @@ describe('ProcessingPanel', () => {
 
   it('should display progress during processing', () => {
     vi.mocked(useVideoStore).mockReturnValue({
+      ...baseStore,
       videoFile: { path: '/test.mp4', name: 'test.mp4', duration: 100 },
-      subtitleFile: null,
       trimSettings: { startTime: 0, endTime: 100 },
       isProcessing: true,
       processingProgress: { currentTime: 50, percentage: 50.0 },
-      setError: mockSetError,
-      setProcessing: mockSetProcessing,
-      setProcessingProgress: mockSetProcessingProgress,
       currentJobId: 'job-123',
-      setCurrentJobId: mockSetCurrentJobId,
     } as any);
 
     render(<ProcessingPanel />);
 
-    expect(screen.getByText('Processing...')).toBeInTheDocument();
-    expect(screen.getByText('50.0%')).toBeInTheDocument();
+    expect(screen.getByText('Processing')).toBeInTheDocument();
+    expect(screen.getAllByText('50.0%').length).toBeGreaterThanOrEqual(1);
   });
 
   it('should show cancel button during processing', () => {
     vi.mocked(useVideoStore).mockReturnValue({
+      ...baseStore,
       videoFile: { path: '/test.mp4', name: 'test.mp4', duration: 100 },
-      subtitleFile: null,
       trimSettings: { startTime: 0, endTime: 100 },
       isProcessing: true,
       processingProgress: { currentTime: 50, percentage: 50.0 },
-      setError: mockSetError,
-      setProcessing: mockSetProcessing,
-      setProcessingProgress: mockSetProcessingProgress,
       currentJobId: 'job-123',
-      setCurrentJobId: mockSetCurrentJobId,
     } as any);
 
     render(<ProcessingPanel />);

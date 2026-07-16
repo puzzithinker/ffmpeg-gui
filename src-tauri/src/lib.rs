@@ -1,6 +1,7 @@
 mod commands;
 mod state;
 
+use commands::kill_process_tree;
 use state::AppState;
 use tauri::{Manager, RunEvent};
 
@@ -17,6 +18,7 @@ pub fn run() {
             commands::video::check_ffmpeg_availability,
             commands::process::process_video,
             commands::process::cancel_process,
+            commands::process::cancel_all_processes,
             commands::logging::write_frontend_log,
             commands::logging::get_log_file_path,
             commands::merge::multi_cut_merge,
@@ -39,24 +41,37 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         // On exit, kill any still-running ffmpeg children so they don't outlive the app as
-        // orphaned processes (which compound system load toward instability). `start_kill` is
-        // synchronous (SIGKILL/terminate) — safe to call from this sync handler. `try_lock`
-        // avoids deadlocking if a monitor task happens to hold the mutex at exit.
+        // orphaned processes (which compound system load toward instability).
         if let RunEvent::Exit = event {
-            // Clone the Arc<Mutex> out of state to break the borrow from `app_handle.state()`
-            // before locking — the State wrapper is a temporary that would otherwise be dropped
-            // while the guard is still live. `.ok()` materialises the guard into a named local so
-            // its drop order is well-defined relative to `active_jobs`.
-            let active_jobs = app_handle.state::<AppState>().active_jobs.clone();
+            let state = app_handle.state::<AppState>();
+
+            // Prefer PID tree kill — works even if a monitor task holds the job mutex.
+            let pids: Vec<(uuid::Uuid, u32)> = {
+                if let Ok(pids) = state.job_pids.try_lock() {
+                    pids.iter().map(|(id, pid)| (*id, *pid)).collect()
+                } else {
+                    Vec::new()
+                }
+            };
+            for (id, pid) in &pids {
+                match kill_process_tree(*pid) {
+                    Ok(()) => log::info!("Killed orphaned ffmpeg job {} (pid {}) on app exit", id, pid),
+                    Err(e) => log::warn!("Failed to kill job {} pid {} on exit: {}", id, pid, e),
+                }
+            }
+
+            // Also start_kill any Children still in the map (best-effort; try_lock avoids deadlock).
+            // Clone the Arc out of state so the temporary State borrow ends before we lock.
+            let active_jobs = state.active_jobs.clone();
             let jobs_guard = active_jobs.try_lock().ok();
             if let Some(mut jobs) = jobs_guard {
                 for (id, mut job) in jobs.drain() {
                     match job.child.start_kill() {
-                        Ok(()) => log::info!("Killed orphaned ffmpeg job {} on app exit", id),
-                        Err(e) => log::warn!("Failed to kill orphaned ffmpeg job {} on exit: {}", id, e),
+                        Ok(()) => log::info!("start_kill on orphaned job {} on app exit", id),
+                        Err(e) => log::warn!("start_kill failed for job {} on exit: {}", id, e),
                     }
                 }
-            } else {
+            } else if pids.is_empty() {
                 log::warn!("Could not acquire job lock on exit; orphaned ffmpeg processes may remain");
             }
         }

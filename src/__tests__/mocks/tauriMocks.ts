@@ -30,6 +30,8 @@ export function setupTauriMocks() {
         return Promise.resolve(true);
       case 'process_video':
         return Promise.resolve('job-uuid-123');
+      case 'cancel_all_processes':
+        return 0
       case 'cancel_process':
         return Promise.resolve();
       default:

@@ -4,8 +4,18 @@ import { tauriAPI } from '../lib/tauri-api'
 import { logger } from '../lib/logger'
 
 const VideoPreview: React.FC = () => {
-  const { videoFile, brightness, setBrightness } = useVideoStore()
+  const { videoFile, brightness, setBrightness, isProcessing } = useVideoStore()
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const videoRef = React.useRef<HTMLVideoElement | null>(null)
+
+  // Unload decode while exporting so preview + ffmpeg don't stack CPU/GPU load.
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el) return
+    if (isProcessing) {
+      el.pause()
+    }
+  }, [isProcessing])
 
   useEffect(() => {
     const getVideoUrl = async () => {
@@ -36,9 +46,10 @@ const VideoPreview: React.FC = () => {
       <div className="aspect-video bg-black rounded-lg overflow-hidden">
         {videoUrl ? (
           <video
+            ref={videoRef}
             className="w-full h-full"
             controls
-            src={videoUrl}
+            src={isProcessing ? undefined : videoUrl}
             style={{ filter: `brightness(${1 + brightness / 100})` }}
             onError={async (e) => {
               const target = e.target as HTMLVideoElement
