@@ -4,7 +4,19 @@ import { tauriAPI } from '../lib/tauri-api'
 import { logger } from '../lib/logger'
 
 const FileSelector: React.FC = () => {
-  const { mode, videoFile, subtitleFile, setVideoFile, setSubtitleFile, setError, setTrimSettings, isEditingSubtitles, setIsEditingSubtitles } = useVideoStore()
+  const {
+    mode,
+    videoFile,
+    subtitleFile,
+    setVideoFile,
+    setSubtitleFile,
+    replaceSubtitleFile,
+    setError,
+    setTrimSettings,
+    isEditingSubtitles,
+    setIsEditingSubtitles,
+    clearSubtitleEdit,
+  } = useVideoStore()
 
   const handleVideoSelect = async () => {
     try {
@@ -40,10 +52,11 @@ const FileSelector: React.FC = () => {
       const filePath = await tauriAPI.selectSubtitleFile()
       if (filePath) {
         const fileName = filePath.split(/[/\\]/).pop() || 'Unknown'
-        setSubtitleFile({
-          path: filePath,
-          name: fileName
-        })
+        // Atomic replace: new path + empty editor so load effect cannot re-read the old file.
+        replaceSubtitleFile(
+          { path: filePath, name: fileName },
+          isEditingSubtitles
+        )
         setError(null)
       }
     } catch (error) {
@@ -54,11 +67,13 @@ const FileSelector: React.FC = () => {
   const handleRemoveVideo = () => {
     setVideoFile(null)
     setSubtitleFile(null)
+    clearSubtitleEdit()
     setTrimSettings({ startTime: 0, endTime: 0 })
   }
 
   const handleRemoveSubtitle = () => {
     setSubtitleFile(null)
+    clearSubtitleEdit()
   }
 
   return (

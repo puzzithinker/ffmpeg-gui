@@ -1,4 +1,3 @@
-pub mod dialog;
 pub mod video;
 pub mod process;
 pub mod logging;
@@ -94,5 +93,16 @@ pub fn kill_process_tree(pid: u32) -> Result<(), String> {
             }
             Err(e) => Err(format!("Failed to kill process {}: {}", pid, e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::kill_process_tree;
+
+    #[test]
+    fn kill_process_tree_pid_zero_is_noop() {
+        // Placeholder PID used before the first multi-cut spawn; must not error.
+        assert!(kill_process_tree(0).is_ok());
     }
 }

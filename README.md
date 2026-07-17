@@ -17,6 +17,7 @@ A beautiful, modern GUI for FFmpeg video processing built with Tauri 2.x, Rust, 
 
 ### Engineering notes
 
+- [REFACTOR_OPPORTUNITIES.md](./REFACTOR_OPPORTUNITIES.md) — architecture map + remaining refactor inventory (post cancel/quality work)
 - [CANCEL_AND_QUALITY_FIX.md](./CANCEL_AND_QUALITY_FIX.md) — cancel orphan bug + quality-first encode paths (issue, root cause, fix, verification)
 - [HARD_RESET_FIX_EXPLAINED.md](./HARD_RESET_FIX_EXPLAINED.md) — Windows 11 hard-reset / hot-path mitigations
 

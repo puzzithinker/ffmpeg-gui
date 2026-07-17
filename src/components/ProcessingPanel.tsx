@@ -1,46 +1,63 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useVideoStore } from '../store/useVideoStore'
 import { tauriAPI } from '../lib/tauri-api'
 import { logger } from '../lib/logger'
 import { formatTime } from '../utils/timeFormatting'
 import { serializeSrt } from '../utils/srtParser'
+import {
+  requiresReencodeFilters,
+  canSelectStreamCopy,
+  showCrfControls,
+  qualitySummaryLabel,
+} from '../utils/exportQuality'
 
 const ProcessingPanel: React.FC = () => {
-  const {
-    mode,
-    videoFile,
-    subtitleFile,
-    trimSettings,
-    brightness,
-    cropSettings,
-    subtitleSettings,
-    subtitleEdit,
-    segments,
-    mergeVideoFiles,
-    isProcessing,
-    processingProgress,
-    setProcessing,
-    setProcessingProgress,
-    setError,
-    currentJobId,
-    setCurrentJobId,
-    qualitySettings,
-    setQualitySettings,
-  } = useVideoStore()
+  // Targeted subscriptions — progress ticks only re-render progress-related slices.
+  const mode = useVideoStore((s) => s.mode)
+  const videoFile = useVideoStore((s) => s.videoFile)
+  const subtitleFile = useVideoStore((s) => s.subtitleFile)
+  const trimSettings = useVideoStore((s) => s.trimSettings)
+  const brightness = useVideoStore((s) => s.brightness)
+  const cropSettings = useVideoStore((s) => s.cropSettings)
+  const subtitleSettings = useVideoStore((s) => s.subtitleSettings)
+  const subtitleEdit = useVideoStore((s) => s.subtitleEdit)
+  const segments = useVideoStore((s) => s.segments)
+  const mergeVideoFiles = useVideoStore((s) => s.mergeVideoFiles)
+  const isProcessing = useVideoStore((s) => s.isProcessing)
+  const processingProgress = useVideoStore((s) => s.processingProgress)
+  const currentJobId = useVideoStore((s) => s.currentJobId)
+  const qualitySettings = useVideoStore((s) => s.qualitySettings)
+  const setProcessing = useVideoStore((s) => s.setProcessing)
+  const setProcessingProgress = useVideoStore((s) => s.setProcessingProgress)
+  const setError = useVideoStore((s) => s.setError)
+  const setCurrentJobId = useVideoStore((s) => s.setCurrentJobId)
+  const setQualitySettings = useVideoStore((s) => s.setQualitySettings)
 
   const [outputPath, setOutputPath] = useState('')
 
-  const hasFilters = mode === 'trim'
-    ? cropSettings.enabled || brightness !== 0 || !!subtitleFile
-    : true
+  const qualityInput = useMemo(
+    () => ({
+      mode,
+      cropEnabled: cropSettings.enabled,
+      brightness,
+      hasSubtitle: !!subtitleFile,
+      qualityMode: qualitySettings.mode,
+    }),
+    [mode, cropSettings.enabled, brightness, subtitleFile, qualitySettings.mode]
+  )
+
+  const filtersForceReencode = requiresReencodeFilters(qualityInput)
+  const streamCopySelectable = canSelectStreamCopy(qualityInput)
+  const crfVisible = showCrfControls(qualityInput)
 
   useEffect(() => {
-    if (hasFilters && qualitySettings.mode === 'copy') {
+    if (filtersForceReencode && qualitySettings.mode === 'copy') {
       setQualitySettings({ mode: 'reencode' })
     }
-  }, [hasFilters, qualitySettings.mode, setQualitySettings])
+  }, [filtersForceReencode, qualitySettings.mode, setQualitySettings])
 
   const getCrfLabel = (crf: number): string => {
+    if (crf <= 10) return 'Near original / very large'
     if (crf <= 15) return 'Near lossless'
     if (crf <= 22) return 'High quality'
     if (crf <= 28) return 'Medium quality'
@@ -225,6 +242,7 @@ const ProcessingPanel: React.FC = () => {
           cropX: cropSettings.enabled ? cropSettings.x : undefined,
           cropY: cropSettings.enabled ? cropSettings.y : undefined,
           crf: qualitySettings.crf,
+          preferCopy: !cropSettings.enabled,
         })
       } else {
         if (mergeVideoFiles.length < 2) {
@@ -249,7 +267,6 @@ const ProcessingPanel: React.FC = () => {
   }
 
   const handleCancel = async () => {
-    // Never no-op: job id may still be null between setProcessing(true) and invoke return.
     const state = useVideoStore.getState()
     const jobId = state.currentJobId
 
@@ -259,13 +276,11 @@ const ProcessingPanel: React.FC = () => {
       } else {
         await tauriAPI.cancelAllProcesses()
       }
-      // Optimistically clear UI; ffmpeg-cancelled will also clear if it arrives first.
       state.setProcessing(false)
       state.setProcessingProgress(null)
       state.setCurrentJobId(null)
       state.setError(null)
     } catch (error) {
-      // Last resort: still try cancel-all so a stale id cannot leave ffmpeg running.
       try {
         await tauriAPI.cancelAllProcesses()
         state.setProcessing(false)
@@ -279,6 +294,17 @@ const ProcessingPanel: React.FC = () => {
   }
 
   const canProcess = getCanProcess()
+  const summaryQuality = qualitySummaryLabel(qualityInput)
+  const summaryQualityWithCrf =
+    filtersForceReencode || qualitySettings.mode === 'reencode' || (mode === 'merge' && crfVisible)
+      ? mode === 'multi-cut' && cropSettings.enabled
+        ? `Frame-accurate re-encode (CRF ${qualitySettings.crf})`
+        : mode === 'trim' && (filtersForceReencode || qualitySettings.mode === 'reencode')
+          ? `Re-encode (CRF ${qualitySettings.crf})`
+          : mode === 'merge'
+            ? summaryQuality
+            : summaryQuality
+      : summaryQuality
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
@@ -397,17 +423,7 @@ const ProcessingPanel: React.FC = () => {
             )}
             <div>
               <p className="text-xs uppercase tracking-wide text-gray-500">Quality</p>
-              <p className="font-medium">
-                {mode === 'merge'
-                  ? 'Stream copy when sources match; re-encode only if needed'
-                  : mode === 'multi-cut'
-                    ? (cropSettings.enabled
-                        ? `Frame-accurate re-encode (CRF ${qualitySettings.crf})`
-                        : 'Exact copy (keyframe cuts)')
-                    : qualitySettings.mode === 'copy' && !hasFilters
-                      ? 'Exact copy'
-                      : `Re-encode (CRF ${qualitySettings.crf})`}
-              </p>
+              <p className="font-medium">{summaryQualityWithCrf}</p>
             </div>
           </div>
         </div>
@@ -415,40 +431,42 @@ const ProcessingPanel: React.FC = () => {
         <div className="border-t pt-3">
           <h3 className="font-medium text-gray-900 mb-2">Quality</h3>
           <div className="space-y-3">
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="quality"
-                  value="copy"
-                  checked={qualitySettings.mode === 'copy'}
-                  onChange={() => setQualitySettings({ mode: 'copy' })}
-                  disabled={hasFilters || isProcessing}
-                  className="text-primary-600 focus:ring-primary-500"
-                />
-                <span className={`text-sm ${hasFilters ? 'text-gray-400' : 'text-gray-700'}`}>
-                  Exact copy
-                </span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="quality"
-                  value="reencode"
-                  checked={qualitySettings.mode === 'reencode'}
-                  onChange={() => setQualitySettings({ mode: 'reencode' })}
-                  disabled={isProcessing}
-                  className="text-primary-600 focus:ring-primary-500"
-                />
-                <span className="text-sm text-gray-700">Custom quality</span>
-              </label>
-            </div>
-            {hasFilters && qualitySettings.mode === 'copy' && (
+            {(mode === 'trim' || mode === 'multi-cut') && (
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="quality"
+                    value="copy"
+                    checked={qualitySettings.mode === 'copy' && streamCopySelectable}
+                    onChange={() => setQualitySettings({ mode: 'copy' })}
+                    disabled={!streamCopySelectable || isProcessing}
+                    className="text-primary-600 focus:ring-primary-500"
+                  />
+                  <span className={`text-sm ${!streamCopySelectable ? 'text-gray-400' : 'text-gray-700'}`}>
+                    Exact copy
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="quality"
+                    value="reencode"
+                    checked={qualitySettings.mode === 'reencode' || !streamCopySelectable}
+                    onChange={() => setQualitySettings({ mode: 'reencode' })}
+                    disabled={isProcessing}
+                    className="text-primary-600 focus:ring-primary-500"
+                  />
+                  <span className="text-sm text-gray-700">Custom quality</span>
+                </label>
+              </div>
+            )}
+            {filtersForceReencode && qualitySettings.mode === 'copy' && mode === 'trim' && (
               <p className="text-xs text-amber-600">
                 Filters require re-encoding. Switching to custom quality mode.
               </p>
             )}
-            {mode === 'trim' && qualitySettings.mode === 'copy' && !hasFilters && (
+            {mode === 'trim' && qualitySettings.mode === 'copy' && !filtersForceReencode && (
               <p className="text-xs text-gray-500">
                 Fastest. Preserves original quality exactly.
               </p>
@@ -462,12 +480,10 @@ const ProcessingPanel: React.FC = () => {
             {mode === 'merge' && (
               <p className="text-xs text-gray-500">
                 Identical sources are joined with stream copy (no quality loss).
-                Mismatched resolution/codec falls back to high-quality re-encode.
+                Mismatched resolution/codec falls back to high-quality re-encode (CRF below).
               </p>
             )}
-            {((mode === 'trim' && qualitySettings.mode === 'reencode')
-              || (mode === 'multi-cut' && cropSettings.enabled)
-              || mode === 'merge') && (
+            {crfVisible && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-700">CRF: {qualitySettings.crf}</span>

@@ -356,7 +356,7 @@ async fn multi_cut_reencode(
         args.push("-c:a".to_string());
         args.push("aac".to_string());
     }
-    let crf_value = params.crf.unwrap_or(18);
+    let crf_value = params.crf.unwrap_or(8);
     args.push("-crf".to_string());
     args.push(crf_value.to_string());
     args.push("-y".to_string());
@@ -502,7 +502,7 @@ pub async fn merge_videos(
             "-c:v".to_string(),
             "libx264".to_string(),
         ];
-        let crf_value = params.crf.unwrap_or(18);
+        let crf_value = params.crf.unwrap_or(8);
         args.push("-crf".to_string());
         args.push(crf_value.to_string());
 

@@ -222,6 +222,43 @@ describe('useVideoStore - subtitle editing', () => {
     expect(result.current.isEditingSubtitles).toBe(false)
   })
 
+  it('replaceSubtitleFile drops old cues so re-import cannot keep stale editor content', () => {
+    const { result } = renderHook(() => useVideoStore())
+
+    act(() => {
+      result.current.setSubtitleFile({ path: '/old.srt', name: 'old.srt' })
+      result.current.setSubtitleEntries([makeEntry({ id: 'old', text: 'OLD LINE' })])
+      result.current.setEditedFilePath('/old_edited.srt')
+      result.current.setIsEditingSubtitles(true)
+    })
+
+    act(() => {
+      result.current.replaceSubtitleFile(
+        { path: '/new.srt', name: 'new.srt' },
+        true
+      )
+    })
+
+    expect(result.current.subtitleFile?.path).toBe('/new.srt')
+    expect(result.current.subtitleEdit.entries).toEqual([])
+    expect(result.current.subtitleEdit.isDirty).toBe(false)
+    expect(result.current.subtitleEdit.editedFilePath).toBeNull()
+    expect(result.current.isEditingSubtitles).toBe(true)
+  })
+
+  it('hydrateSubtitleEntries loads file content without marking dirty', () => {
+    const { result } = renderHook(() => useVideoStore())
+    const entries = [makeEntry({ id: 'a', text: 'From disk' })]
+
+    act(() => {
+      result.current.hydrateSubtitleEntries(entries)
+    })
+
+    expect(result.current.subtitleEdit.entries).toEqual(entries)
+    expect(result.current.subtitleEdit.isDirty).toBe(false)
+    expect(result.current.subtitleEdit.editedFilePath).toBeNull()
+  })
+
   it('should reset subtitle edit state on full reset', () => {
     const { result } = renderHook(() => useVideoStore())
 

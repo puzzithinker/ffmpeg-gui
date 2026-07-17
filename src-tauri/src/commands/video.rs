@@ -329,6 +329,41 @@ mod tests {
     }
 
     #[test]
+    fn test_profiles_incompatible_audio_codec() {
+        // Merge stream-copy must refuse when audio codecs differ (would produce broken concat).
+        let a = StreamProfile {
+            video_codec: "h264".into(),
+            width: 1920,
+            height: 1080,
+            pix_fmt: "yuv420p".into(),
+            avg_frame_rate: "30/1".into(),
+            audio_codec: Some("aac".into()),
+            sample_rate: Some("48000".into()),
+            channels: Some(2),
+        };
+        let mut b = a.clone();
+        b.audio_codec = Some("mp3".into());
+        assert!(!profiles_compatible_for_copy(&[a, b]));
+    }
+
+    #[test]
+    fn test_profiles_incompatible_video_codec() {
+        let a = StreamProfile {
+            video_codec: "h264".into(),
+            width: 1920,
+            height: 1080,
+            pix_fmt: "yuv420p".into(),
+            avg_frame_rate: "30/1".into(),
+            audio_codec: None,
+            sample_rate: None,
+            channels: None,
+        };
+        let mut b = a.clone();
+        b.video_codec = "hevc".into();
+        assert!(!profiles_compatible_for_copy(&[a, b]));
+    }
+
+    #[test]
     fn test_profiles_compatible_frame_rate_forms() {
         let a = StreamProfile {
             video_codec: "h264".into(),

@@ -11,14 +11,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
-            commands::dialog::select_video_file,
-            commands::dialog::select_subtitle_file,
-            commands::dialog::select_output_file,
+            // File pickers live in the frontend via @tauri-apps/plugin-dialog (not Rust IPC).
             commands::video::get_duration,
             commands::video::check_ffmpeg_availability,
-            commands::process::process_video,
-            commands::process::cancel_process,
-            commands::process::cancel_all_processes,
+            // Command macros live on the defining modules (re-exports omit __cmd__ helpers).
+            commands::process::command::process_video,
+            commands::process::cancel::cancel_process,
+            commands::process::cancel::cancel_all_processes,
             commands::logging::write_frontend_log,
             commands::logging::get_log_file_path,
             commands::merge::multi_cut_merge,

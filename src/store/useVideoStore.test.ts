@@ -22,6 +22,8 @@ describe('useVideoStore', () => {
     expect(result.current.processingProgress).toBeNull();
     expect(result.current.error).toBeNull();
     expect(result.current.currentJobId).toBeNull();
+    // Near-original re-encode default (CRF 8), not the old "delivery" default of 18.
+    expect(result.current.qualitySettings).toEqual({ mode: 'copy', crf: 8 });
   });
 
   it('should set video file', () => {
@@ -159,6 +161,26 @@ describe('useVideoStore', () => {
     expect(result.current.processingProgress).toBeNull();
     expect(result.current.error).toBeNull();
     expect(result.current.currentJobId).toBeNull();
+    expect(result.current.qualitySettings).toEqual({ mode: 'copy', crf: 8 });
+  });
+
+  it('setQualitySettings merges partial updates and reset restores CRF 8', () => {
+    const { result } = renderHook(() => useVideoStore());
+
+    act(() => {
+      result.current.setQualitySettings({ mode: 'reencode', crf: 23 });
+    });
+    expect(result.current.qualitySettings).toEqual({ mode: 'reencode', crf: 23 });
+
+    act(() => {
+      result.current.setQualitySettings({ crf: 8 });
+    });
+    expect(result.current.qualitySettings).toEqual({ mode: 'reencode', crf: 8 });
+
+    act(() => {
+      result.current.reset();
+    });
+    expect(result.current.qualitySettings).toEqual({ mode: 'copy', crf: 8 });
   });
 
   it('should handle multiple state updates in sequence', () => {

@@ -5,47 +5,62 @@ import { parseSrt, serializeSrt, msToSrtTime, parseSrtTimeInput } from '../utils
 import type { SubtitleEntry } from '../types'
 
 const SubtitleEditor: React.FC = () => {
-  const {
-    subtitleFile,
-    subtitleEdit,
-    setSubtitleEntries,
-    updateSubtitleEntry,
-    addSubtitleEntry,
-    removeSubtitleEntry,
-    setBilingualMode,
-    setPrimaryLanguage,
-    setSecondaryLanguage,
-    setSecondaryLanguagePosition,
-    setEditedFilePath,
-    clearSubtitleEdit,
-  } = useVideoStore()
+  const subtitleFile = useVideoStore((s) => s.subtitleFile)
+  const subtitleEdit = useVideoStore((s) => s.subtitleEdit)
+  const setSubtitleEntries = useVideoStore((s) => s.setSubtitleEntries)
+  const hydrateSubtitleEntries = useVideoStore((s) => s.hydrateSubtitleEntries)
+  const updateSubtitleEntry = useVideoStore((s) => s.updateSubtitleEntry)
+  const addSubtitleEntry = useVideoStore((s) => s.addSubtitleEntry)
+  const removeSubtitleEntry = useVideoStore((s) => s.removeSubtitleEntry)
+  const setBilingualMode = useVideoStore((s) => s.setBilingualMode)
+  const setPrimaryLanguage = useVideoStore((s) => s.setPrimaryLanguage)
+  const setSecondaryLanguage = useVideoStore((s) => s.setSecondaryLanguage)
+  const setSecondaryLanguagePosition = useVideoStore((s) => s.setSecondaryLanguagePosition)
+  const setEditedFilePath = useVideoStore((s) => s.setEditedFilePath)
+  const clearSubtitleEdit = useVideoStore((s) => s.clearSubtitleEdit)
 
   const [exporting, setExporting] = useState(false)
   const [loading, setLoading] = useState(false)
   const [currentEditingId, setCurrentEditingId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Track which path we last loaded so re-importing a different (or replaced) file always reloads.
+  const loadedPathRef = useRef<string | null>(null)
 
   useEffect(() => {
+    if (!subtitleFile) {
+      loadedPathRef.current = null
+      return
+    }
+
+    // Only skip reload when this exact path is already in the editor.
+    if (loadedPathRef.current === subtitleFile.path && subtitleEdit.entries.length > 0) {
+      return
+    }
+
+    let cancelled = false
     const loadSubtitle = async () => {
-      if (subtitleFile && subtitleEdit.entries.length === 0) {
-        setLoading(true)
-        try {
-          const content = await tauriAPI.readSubtitleFile(subtitleFile.path)
-          const entries = parseSrt(content)
-          setSubtitleEntries(entries)
-          const hasBilingual = entries.some(e => e.bilingualText.trim() !== '')
-          if (hasBilingual) {
-            setBilingualMode(true)
-          }
-        } catch {
-          // Silently fail; user can load manually
-        } finally {
-          setLoading(false)
-        }
+      setLoading(true)
+      try {
+        const content = await tauriAPI.readSubtitleFile(subtitleFile.path)
+        if (cancelled) return
+        const entries = parseSrt(content)
+        // hydrate = not dirty; burn-in uses the new file path until the user edits.
+        hydrateSubtitleEntries(entries)
+        const hasBilingual = entries.some(e => e.bilingualText.trim() !== '')
+        setBilingualMode(hasBilingual)
+        loadedPathRef.current = subtitleFile.path
+        setCurrentEditingId(null)
+      } catch {
+        // Silently fail; user can load manually
+      } finally {
+        if (!cancelled) setLoading(false)
       }
     }
-    loadSubtitle()
-  }, [subtitleFile, subtitleEdit.entries.length, setSubtitleEntries, setBilingualMode])
+    void loadSubtitle()
+    return () => {
+      cancelled = true
+    }
+  }, [subtitleFile, subtitleFile?.path, subtitleEdit.entries.length, hydrateSubtitleEntries, setBilingualMode])
 
   const handleTimeChange = (id: string, field: 'startTimeMs' | 'endTimeMs', value: string) => {
     const ms = parseSrtTimeInput(value)

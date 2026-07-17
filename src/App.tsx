@@ -7,7 +7,8 @@ import { logger } from './lib/logger'
 
 function App() {
   const [ffmpegAvailable, setFfmpegAvailable] = useState<boolean | null>(null)
-  const { isProcessing, currentJobId, setCurrentJobId, setProcessing, setProcessingProgress } = useVideoStore()
+  // Targeted subscriptions only — close handler reads latest job state via getState().
+  const isProcessing = useVideoStore((s) => s.isProcessing)
 
   // Check FFmpeg availability on startup
   useEffect(() => {
@@ -15,7 +16,7 @@ function App() {
       try {
         const available = await tauriAPI.checkFfmpegAvailability()
         setFfmpegAvailable(available)
-      } catch (error) {
+      } catch {
         setFfmpegAvailable(false)
       }
     }
@@ -23,7 +24,7 @@ function App() {
     checkFFmpeg()
   }, [])
 
-  // Set up window close handler
+  // Stable close listener: registered once; always reads latest store via getState().
   useEffect(() => {
     let unlisten: (() => void) | null = null
     let isClosing = false
@@ -42,8 +43,18 @@ function App() {
 
         isClosing = true
 
-        if (isProcessing && currentJobId) {
-          await logger.log(`[App] Close blocked, processing job=${currentJobId}`)
+        const {
+          isProcessing: processing,
+          currentJobId,
+          setCurrentJobId,
+          setProcessing,
+          setProcessingProgress,
+        } = useVideoStore.getState()
+
+        if (processing) {
+          await logger.log(
+            `[App] Close blocked, processing job=${currentJobId ?? 'unknown'}`
+          )
 
           const shouldClose = window.confirm('Processing in progress. Cancel and close?')
 
@@ -62,7 +73,9 @@ function App() {
             setCurrentJobId(null)
             setProcessing(false)
             setProcessingProgress(null)
-            await logger.log(`[App] Processing cancelled during close for job=${currentJobId}`)
+            await logger.log(
+              `[App] Processing cancelled during close for job=${currentJobId ?? 'all'}`
+            )
           } catch (error) {
             console.error('Failed to cancel process:', error)
             try {
@@ -90,7 +103,7 @@ function App() {
         unlisten()
       }
     }
-  }, [isProcessing, currentJobId, setCurrentJobId, setProcessing, setProcessingProgress])
+  }, [])
 
   // Blocking modal if FFmpeg is not available
   if (ffmpegAvailable === false) {
@@ -183,6 +196,11 @@ function App() {
           <p className="text-gray-600 text-center mt-2">
             Trim, cut, merge videos and burn subtitles with ease
           </p>
+          {isProcessing && (
+            <p className="text-center text-sm text-primary-600 mt-1">
+              Export in progress…
+            </p>
+          )}
         </header>
         <VideoProcessor />
       </div>
