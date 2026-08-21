@@ -45,6 +45,79 @@ struct ProbeStream {
     channels: Option<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ProbeMediaOutput {
+    format: Option<ProbeFormat>,
+    streams: Option<Vec<ProbeStream>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MediaInfo {
+    pub duration: f64,
+    pub width: u32,
+    pub height: u32,
+}
+
+fn parse_media_info(probe: &ProbeMediaOutput) -> Result<MediaInfo, String> {
+    let duration = probe
+        .format
+        .as_ref()
+        .ok_or_else(|| "ffprobe output missing format".to_string())?
+        .duration
+        .parse::<f64>()
+        .map_err(|e| format!("Failed to parse duration: {}", e))?;
+
+    let video = probe.streams.as_ref().and_then(|streams| {
+        streams
+            .iter()
+            .find(|s| s.codec_type.as_deref() == Some("video"))
+    });
+
+    Ok(MediaInfo {
+        duration,
+        width: video.and_then(|v| v.width).unwrap_or(0),
+        height: video.and_then(|v| v.height).unwrap_or(0),
+    })
+}
+
+#[tauri::command]
+pub async fn get_media_info(file_path: String) -> Result<MediaInfo, String> {
+    log::info!("Getting media info for file: {}", file_path);
+
+    if !Path::new(&file_path).exists() {
+        return Err("File does not exist".to_string());
+    }
+
+    let mut command = Command::new("ffprobe");
+    command.args(&[
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
+        "-show_format",
+        "-show_streams",
+        &file_path,
+    ]);
+    apply_no_window(&mut command);
+
+    let output = command
+        .output()
+        .await
+        .map_err(|e| format!("Failed to spawn ffprobe: {}. Make sure ffprobe is installed and in PATH.", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "ffprobe failed with exit code: {:?}",
+            output.status.code()
+        ));
+    }
+
+    let probe: ProbeMediaOutput = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("Failed to parse ffprobe output: {}", e))?;
+
+    parse_media_info(&probe)
+}
+
 #[tauri::command]
 pub async fn get_duration(file_path: String) -> Result<f64, String> {
     log::info!("Getting duration for file: {}", file_path);
@@ -407,5 +480,52 @@ mod tests {
         assert_eq!(profile.width, 1280);
         assert_eq!(profile.audio_codec.as_deref(), Some("aac"));
         assert_eq!(profile.channels, Some(2));
+    }
+
+    #[test]
+    fn test_parse_media_info_duration_and_size() {
+        let probe: ProbeMediaOutput = serde_json::from_value(json!({
+            "format": { "duration": "125.5" },
+            "streams": [
+                {
+                    "codec_type": "audio",
+                    "codec_name": "aac"
+                },
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 1280,
+                    "height": 720
+                }
+            ]
+        }))
+        .unwrap();
+
+        assert_eq!(
+            parse_media_info(&probe).unwrap(),
+            MediaInfo {
+                duration: 125.5,
+                width: 1280,
+                height: 720
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_media_info_missing_video_stream() {
+        let probe: ProbeMediaOutput = serde_json::from_value(json!({
+            "format": { "duration": "10" },
+            "streams": [{ "codec_type": "audio", "codec_name": "aac" }]
+        }))
+        .unwrap();
+
+        assert_eq!(
+            parse_media_info(&probe).unwrap(),
+            MediaInfo {
+                duration: 10.0,
+                width: 0,
+                height: 0
+            }
+        );
     }
 }

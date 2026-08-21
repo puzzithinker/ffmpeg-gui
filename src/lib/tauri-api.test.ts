@@ -79,9 +79,12 @@ describe('tauriAPI dialog helpers', () => {
     await tauriAPI.cancelProcess('job-1');
     await tauriAPI.cancelAllProcesses();
 
+    await tauriAPI.getMediaInfo('foo.mp4');
+
     expect(invoke).toHaveBeenNthCalledWith(1, 'get_duration', { filePath: 'foo.mp4' });
     expect(invoke).toHaveBeenNthCalledWith(2, 'cancel_process', { jobId: 'job-1' });
     expect(invoke).toHaveBeenNthCalledWith(3, 'cancel_all_processes');
+    expect(invoke).toHaveBeenNthCalledWith(4, 'get_media_info', { filePath: 'foo.mp4' });
   });
 
   it('returns string path from save result', async () => {

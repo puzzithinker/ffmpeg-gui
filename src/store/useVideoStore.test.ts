@@ -201,4 +201,93 @@ describe('useVideoStore', () => {
     expect(result.current.trimSettings).toEqual({ startTime: 5, endTime: 95 });
     expect(result.current.isProcessing).toBe(true);
   });
+
+  it('requestSeek clamps to duration and bumps seekVersion', () => {
+    const { result } = renderHook(() => useVideoStore());
+
+    act(() => {
+      result.current.setVideoFile({ path: '/a.mp4', name: 'a.mp4', duration: 10, width: 1280, height: 720 });
+      result.current.requestSeek(4.5);
+    });
+    expect(result.current.currentTime).toBe(4.5);
+    expect(result.current.seekTarget).toBe(4.5);
+    const version = result.current.seekVersion;
+
+    act(() => {
+      result.current.requestSeek(99);
+    });
+    expect(result.current.currentTime).toBe(10);
+    expect(result.current.seekVersion).toBe(version + 1);
+  });
+
+  it('markTrimIn/Out use the playhead', () => {
+    const { result } = renderHook(() => useVideoStore());
+
+    act(() => {
+      result.current.setVideoFile({ path: '/a.mp4', name: 'a.mp4', duration: 20 });
+      result.current.setTrimSettings({ startTime: 0, endTime: 20 });
+      result.current.setCurrentTime(3);
+      result.current.markTrimIn();
+      result.current.setCurrentTime(8);
+      result.current.markTrimOut();
+    });
+
+    expect(result.current.trimSettings).toEqual({ startTime: 3, endTime: 8 });
+  });
+
+  it('markSegmentIn/Out create a segment from the playhead window', () => {
+    const { result } = renderHook(() => useVideoStore());
+
+    act(() => {
+      result.current.setVideoFile({ path: '/a.mp4', name: 'a.mp4', duration: 30 });
+      result.current.setCurrentTime(2);
+      result.current.markSegmentIn();
+      result.current.setCurrentTime(7);
+      result.current.markSegmentOut();
+    });
+
+    expect(result.current.segments).toHaveLength(1);
+    expect(result.current.segments[0].startTime).toBe(2);
+    expect(result.current.segments[0].endTime).toBe(7);
+    expect(result.current.segmentInPoint).toBeNull();
+  });
+
+  it('setCueStartFromPlayhead updates the cue and marks dirty', () => {
+    const { result } = renderHook(() => useVideoStore());
+
+    act(() => {
+      result.current.setVideoFile({ path: '/a.mp4', name: 'a.mp4', duration: 30 });
+      result.current.hydrateSubtitleEntries([
+        { id: 'c1', index: 1, startTimeMs: 0, endTimeMs: 4000, text: 'Hi', bilingualText: '' },
+      ]);
+      result.current.setCurrentTime(1.25);
+      result.current.setCueStartFromPlayhead('c1');
+    });
+
+    expect(result.current.subtitleEdit.entries[0].startTimeMs).toBe(1250);
+    expect(result.current.subtitleEdit.isDirty).toBe(true);
+  });
+
+  it('setVideoFile with dimensions seeds a full-frame crop', () => {
+    const { result } = renderHook(() => useVideoStore());
+
+    act(() => {
+      result.current.setVideoFile({
+        path: '/a.mp4',
+        name: 'a.mp4',
+        duration: 10,
+        width: 1280,
+        height: 720,
+      });
+    });
+
+    expect(result.current.cropSettings).toEqual({
+      enabled: false,
+      width: 1280,
+      height: 720,
+      x: 0,
+      y: 0,
+    });
+    expect(result.current.currentTime).toBe(0);
+  });
 });

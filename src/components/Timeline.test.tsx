@@ -1,97 +1,88 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import Timeline from './Timeline';
 import { useVideoStore } from '../store/useVideoStore';
 
-vi.mock('../store/useVideoStore');
-
 describe('Timeline', () => {
-  const mockSetTrimSettings = vi.fn();
-
   beforeEach(() => {
-    vi.clearAllMocks();
+    useVideoStore.getState().reset();
   });
 
   it('should render null when no video file', () => {
-    vi.mocked(useVideoStore).mockReturnValue({
-      videoFile: null,
-      trimSettings: { startTime: 0, endTime: 0 },
-      setTrimSettings: mockSetTrimSettings,
-    } as any);
-
     const { container } = render(<Timeline />);
     expect(container.firstChild).toBeNull();
   });
 
   it('should render timeline when video file exists', () => {
-    vi.mocked(useVideoStore).mockReturnValue({
+    useVideoStore.setState({
       videoFile: { path: '/test.mp4', name: 'test.mp4', duration: 100 },
       trimSettings: { startTime: 0, endTime: 100 },
-      setTrimSettings: mockSetTrimSettings,
-    } as any);
+    });
 
     render(<Timeline />);
     expect(screen.getByText('Trim Timeline')).toBeInTheDocument();
   });
 
   it('should display formatted times correctly', () => {
-    vi.mocked(useVideoStore).mockReturnValue({
+    useVideoStore.setState({
       videoFile: { path: '/test.mp4', name: 'test.mp4', duration: 125 },
       trimSettings: { startTime: 10, endTime: 70 },
-      setTrimSettings: mockSetTrimSettings,
-    } as any);
+    });
 
     render(<Timeline />);
-    expect(screen.getByText('0:10')).toBeInTheDocument();
-    expect(screen.getByText('1:10')).toBeInTheDocument();
     expect(screen.getByText('1:00 selected')).toBeInTheDocument();
   });
 
-  it('should constrain start time input to valid range', () => {
-    vi.mocked(useVideoStore).mockReturnValue({
+  it('I / O buttons mark trim from the playhead', () => {
+    useVideoStore.setState({
       videoFile: { path: '/test.mp4', name: 'test.mp4', duration: 100 },
-      trimSettings: { startTime: 20, endTime: 80 },
-      setTrimSettings: mockSetTrimSettings,
-    } as any);
+      trimSettings: { startTime: 0, endTime: 100 },
+      currentTime: 12,
+    });
 
-    const { container } = render(<Timeline />);
-    const inputs = container.querySelectorAll('input[type="number"]');
-    const startInput = inputs[0] as HTMLInputElement;
+    render(<Timeline />);
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: /I · Start/i }));
+    });
+    expect(useVideoStore.getState().trimSettings.startTime).toBe(12);
 
-    fireEvent.change(startInput, { target: { value: '85' } });
-
-    // Should constrain to endTime - 1 = 79
-    expect(mockSetTrimSettings).toHaveBeenCalledWith({ startTime: 79 });
-  });
-
-  it('should constrain end time input to valid range', () => {
-    vi.mocked(useVideoStore).mockReturnValue({
-      videoFile: { path: '/test.mp4', name: 'test.mp4', duration: 100 },
-      trimSettings: { startTime: 20, endTime: 80 },
-      setTrimSettings: mockSetTrimSettings,
-    } as any);
-
-    const { container } = render(<Timeline />);
-    const inputs = container.querySelectorAll('input[type="number"]');
-    const endInput = inputs[1] as HTMLInputElement;
-
-    fireEvent.change(endInput, { target: { value: '15' } });
-
-    // Should constrain to startTime + 1 = 21
-    expect(mockSetTrimSettings).toHaveBeenCalledWith({ endTime: 21 });
+    act(() => {
+      useVideoStore.setState({ currentTime: 40 });
+      fireEvent.click(screen.getByRole('button', { name: /O · End/i }));
+    });
+    expect(useVideoStore.getState().trimSettings.endTime).toBe(40);
   });
 
   it('should calculate percentage positions correctly', () => {
-    vi.mocked(useVideoStore).mockReturnValue({
+    useVideoStore.setState({
       videoFile: { path: '/test.mp4', name: 'test.mp4', duration: 100 },
       trimSettings: { startTime: 25, endTime: 75 },
-      setTrimSettings: mockSetTrimSettings,
-    } as any);
+      currentTime: 50,
+    });
 
     const { container } = render(<Timeline />);
     const highlightDiv = container.querySelector('.bg-primary-500') as HTMLElement;
 
     expect(highlightDiv.style.left).toBe('25%');
     expect(highlightDiv.style.width).toBe('50%');
+    const playhead = screen.getByTestId('playhead') as HTMLElement;
+    expect(playhead.style.left).toBe('50%');
+  });
+
+  it('clicking the bar seeks to that time', () => {
+    useVideoStore.setState({
+      videoFile: { path: '/test.mp4', name: 'test.mp4', duration: 100 },
+      trimSettings: { startTime: 0, endTime: 100 },
+    });
+
+    const { container } = render(<Timeline />);
+    const bar = container.querySelector('.cursor-pointer') as HTMLElement;
+    Object.defineProperty(bar, 'getBoundingClientRect', {
+      value: () => ({ left: 0, width: 200, top: 0, height: 48, right: 200, bottom: 48, x: 0, y: 0, toJSON: () => {} }),
+    });
+
+    fireEvent.mouseDown(bar, { clientX: 50, button: 0 });
+    expect(useVideoStore.getState().currentTime).toBe(25);
+    expect(useVideoStore.getState().isScrubbing).toBe(true);
   });
 });

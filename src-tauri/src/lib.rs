@@ -13,6 +13,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // File pickers live in the frontend via @tauri-apps/plugin-dialog (not Rust IPC).
             commands::video::get_duration,
+            commands::video::get_media_info,
             commands::video::check_ffmpeg_availability,
             // Command macros live on the defining modules (re-exports omit __cmd__ helpers).
             commands::process::command::process_video,

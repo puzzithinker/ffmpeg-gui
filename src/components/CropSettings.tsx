@@ -2,21 +2,51 @@ import React from 'react'
 import { useVideoStore } from '../store/useVideoStore'
 
 const CropSettings: React.FC = () => {
-  const { cropSettings, setCropSettings } = useVideoStore()
+  const cropSettings = useVideoStore((s) => s.cropSettings)
+  const setCropSettings = useVideoStore((s) => s.setCropSettings)
+  const videoFile = useVideoStore((s) => s.videoFile)
+  const sourceW = videoFile?.width
+  const sourceH = videoFile?.height
+
+  const resetFullFrame = () => {
+    if (sourceW && sourceH) {
+      setCropSettings({
+        enabled: cropSettings.enabled,
+        width: sourceW - (sourceW % 2),
+        height: sourceH - (sourceH % 2),
+        x: 0,
+        y: 0,
+      })
+    } else {
+      setCropSettings({ width: 1920, height: 1080, x: 0, y: 0 })
+    }
+  }
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold">Crop</h2>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <span className="text-sm text-gray-600">Enable</span>
-          <input
-            type="checkbox"
-            checked={cropSettings.enabled}
-            onChange={(e) => setCropSettings({ enabled: e.target.checked })}
-            className="w-4 h-4 text-primary-500 rounded border-gray-300 focus:ring-primary-500"
-          />
-        </label>
+        <div className="flex items-center gap-3">
+          {sourceW && sourceH && (
+            <span className="text-xs text-gray-500">{sourceW}×{sourceH}</span>
+          )}
+          <button
+            type="button"
+            onClick={resetFullFrame}
+            className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+          >
+            Full frame
+          </button>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <span className="text-sm text-gray-600">Enable</span>
+            <input
+              type="checkbox"
+              checked={cropSettings.enabled}
+              onChange={(e) => setCropSettings({ enabled: e.target.checked })}
+              className="w-4 h-4 text-primary-500 rounded border-gray-300 focus:ring-primary-500"
+            />
+          </label>
+        </div>
       </div>
 
       <div className={`space-y-4 ${cropSettings.enabled ? '' : 'opacity-50 pointer-events-none'}`}>

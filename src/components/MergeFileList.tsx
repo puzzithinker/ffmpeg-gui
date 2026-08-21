@@ -1,18 +1,17 @@
 import React from 'react'
 import { useVideoStore } from '../store/useVideoStore'
 import { tauriAPI } from '../lib/tauri-api'
+import { applyMergeVideoPath } from '../lib/media'
 
 const MergeFileList: React.FC = () => {
-  const { mergeVideoFiles, addMergeVideo, removeMergeVideo, reorderMergeVideos, clearMergeVideos, setError } = useVideoStore()
+  const { mergeVideoFiles, removeMergeVideo, reorderMergeVideos, clearMergeVideos, setError } = useVideoStore()
 
   const handleAddFiles = async () => {
     try {
       const paths = await tauriAPI.selectMultipleVideoFiles()
       if (paths) {
         for (const path of paths) {
-          const duration = await tauriAPI.getVideoDuration(path)
-          const name = path.split(/[/\\]/).pop() || 'Unknown'
-          addMergeVideo({ path, name, duration })
+          await applyMergeVideoPath(path)
         }
       }
     } catch (error) {
@@ -63,7 +62,7 @@ const MergeFileList: React.FC = () => {
       {mergeVideoFiles.length === 0 && (
         <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
           <p className="text-gray-500">No videos selected</p>
-          <p className="text-gray-400 text-sm mt-1">Click &quot;+ Add Videos&quot; to select files</p>
+          <p className="text-gray-400 text-sm mt-1">Drop videos here or click &quot;+ Add Videos&quot;</p>
         </div>
       )}
 

@@ -4,7 +4,17 @@ import { formatTime } from '../utils/timeFormatting'
 import TimestampInput from './TimestampInput'
 
 const SegmentEditor: React.FC = () => {
-  const { videoFile, segments, addSegment, updateSegment, removeSegment } = useVideoStore()
+  const videoFile = useVideoStore((s) => s.videoFile)
+  const segments = useVideoStore((s) => s.segments)
+  const addSegment = useVideoStore((s) => s.addSegment)
+  const addSegmentAtPlayhead = useVideoStore((s) => s.addSegmentAtPlayhead)
+  const markSegmentIn = useVideoStore((s) => s.markSegmentIn)
+  const markSegmentOut = useVideoStore((s) => s.markSegmentOut)
+  const updateSegment = useVideoStore((s) => s.updateSegment)
+  const removeSegment = useVideoStore((s) => s.removeSegment)
+  const requestSeek = useVideoStore((s) => s.requestSeek)
+  const currentTime = useVideoStore((s) => s.currentTime)
+  const segmentInPoint = useVideoStore((s) => s.segmentInPoint)
 
   if (!videoFile) return null
 
@@ -12,17 +22,47 @@ const SegmentEditor: React.FC = () => {
     <div className="bg-white rounded-lg shadow-md p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold">Segments</h2>
-        <button
-          onClick={addSegment}
-          className="px-3 py-1.5 bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium rounded-md"
-        >
-          + Add Segment
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={markSegmentIn}
+            className="px-3 py-1.5 border border-gray-300 hover:bg-gray-50 text-sm font-medium rounded-md"
+            title="Mark in-point at playhead (I)"
+          >
+            I · In
+          </button>
+          <button
+            type="button"
+            onClick={markSegmentOut}
+            className="px-3 py-1.5 bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium rounded-md"
+            title="Close segment at playhead (O)"
+          >
+            O · Out
+          </button>
+          <button
+            type="button"
+            onClick={addSegmentAtPlayhead}
+            className="px-3 py-1.5 border border-gray-300 hover:bg-gray-50 text-sm font-medium rounded-md"
+          >
+            Add at playhead
+          </button>
+          <button
+            onClick={addSegment}
+            className="px-3 py-1.5 border border-gray-300 hover:bg-gray-50 text-sm font-medium rounded-md"
+          >
+            + Append
+          </button>
+        </div>
       </div>
 
       {segments.length === 0 && (
         <p className="text-gray-500 text-sm text-center py-4">
-          No segments added. Click &quot;+ Add Segment&quot; to start.
+          No segments yet. Play the video, press I then O, or add at the playhead ({formatTime(currentTime)}).
+          {segmentInPoint != null && (
+            <span className="block mt-1 text-primary-600">
+              In-point marked at {formatTime(segmentInPoint)}
+            </span>
+          )}
         </p>
       )}
 
@@ -34,7 +74,14 @@ const SegmentEditor: React.FC = () => {
               key={seg.id}
               className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200"
             >
-              <span className="text-sm font-medium text-gray-500 w-6">#{index + 1}</span>
+              <button
+                type="button"
+                className="text-sm font-medium text-primary-600 w-8 text-left hover:underline"
+                title="Seek to segment start"
+                onClick={() => requestSeek(seg.startTime)}
+              >
+                #{index + 1}
+              </button>
 
               <div className="flex-1 grid grid-cols-2 gap-3">
                 <TimestampInput

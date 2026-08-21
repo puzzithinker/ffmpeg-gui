@@ -1,14 +1,38 @@
-import React, { useState, useEffect } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useVideoStore } from '../store/useVideoStore'
 import { tauriAPI } from '../lib/tauri-api'
 import { logger } from '../lib/logger'
+import { findActiveCue } from '../utils/playback'
+import { containRect, cropToDisplayRect } from '../utils/cropGeometry'
+import SubtitleOverlay from './SubtitleOverlay'
+import CropOverlay from './CropOverlay'
 
 const VideoPreview: React.FC = () => {
-  const { videoFile, brightness, setBrightness, isProcessing } = useVideoStore()
-  const [videoUrl, setVideoUrl] = useState<string | null>(null)
-  const videoRef = React.useRef<HTMLVideoElement | null>(null)
+  const videoFile = useVideoStore((s) => s.videoFile)
+  const brightness = useVideoStore((s) => s.brightness)
+  const setBrightness = useVideoStore((s) => s.setBrightness)
+  const isProcessing = useVideoStore((s) => s.isProcessing)
+  const subtitleFile = useVideoStore((s) => s.subtitleFile)
+  const subtitleEdit = useVideoStore((s) => s.subtitleEdit)
+  const subtitleSettings = useVideoStore((s) => s.subtitleSettings)
+  const cropSettings = useVideoStore((s) => s.cropSettings)
+  const setCropSettings = useVideoStore((s) => s.setCropSettings)
+  const currentTime = useVideoStore((s) => s.currentTime)
+  const isScrubbing = useVideoStore((s) => s.isScrubbing)
+  const seekTarget = useVideoStore((s) => s.seekTarget)
+  const seekVersion = useVideoStore((s) => s.seekVersion)
+  const playbackIntent = useVideoStore((s) => s.playbackIntent)
+  const playbackIntentVersion = useVideoStore((s) => s.playbackIntentVersion)
+  const setCurrentTime = useVideoStore((s) => s.setCurrentTime)
+  const setIsPlaying = useVideoStore((s) => s.setIsPlaying)
+  const setVideoDimensions = useVideoStore((s) => s.setVideoDimensions)
 
-  // Unload decode while exporting so preview + ffmpeg don't stack CPU/GPU load.
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const lastStoreWrite = useRef(0)
+
   useEffect(() => {
     const el = videoRef.current
     if (!el) return
@@ -17,12 +41,14 @@ const VideoPreview: React.FC = () => {
     }
   }, [isProcessing])
 
+  const videoPath = videoFile?.path
+
   useEffect(() => {
     const getVideoUrl = async () => {
-      if (videoFile) {
+      if (videoPath) {
         try {
-          await logger.log(`[VideoPreview] Getting video URL for: ${videoFile.path}`)
-          const url = await tauriAPI.getVideoUrl(videoFile.path)
+          await logger.log(`[VideoPreview] Getting video URL for: ${videoPath}`)
+          const url = await tauriAPI.getVideoUrl(videoPath)
           await logger.log(`[VideoPreview] Generated video URL: ${url}`)
           setVideoUrl(url)
         } catch (error) {
@@ -35,22 +61,93 @@ const VideoPreview: React.FC = () => {
     }
 
     getVideoUrl()
-  }, [videoFile])
+  }, [videoPath])
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const measure = () => {
+      const rect = el.getBoundingClientRect()
+      setContainerSize({ width: rect.width, height: rect.height })
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [videoUrl])
+
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el || seekTarget == null) return
+    if (Math.abs(el.currentTime - seekTarget) > 0.04) {
+      el.currentTime = seekTarget
+    }
+  }, [seekVersion, seekTarget])
+
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el || playbackIntentVersion === 0) return
+    if (playbackIntent === 'play') {
+      void el.play().catch(() => {})
+    } else if (playbackIntent === 'pause') {
+      el.pause()
+    } else if (playbackIntent === 'toggle') {
+      if (el.paused) void el.play().catch(() => {})
+      else el.pause()
+    }
+  }, [playbackIntent, playbackIntentVersion])
 
   if (!videoFile) return null
+
+  const videoWidth = videoFile.width ?? 0
+  const videoHeight = videoFile.height ?? 0
+  const displayed =
+    videoWidth > 0 && videoHeight > 0
+      ? containRect(containerSize, { width: videoWidth, height: videoHeight })
+      : { x: 0, y: 0, width: containerSize.width, height: containerSize.height }
+  const subtitleAnchor =
+    cropSettings.enabled && videoWidth > 0 && videoHeight > 0
+      ? cropToDisplayRect(cropSettings, { width: videoWidth, height: videoHeight }, displayed)
+      : displayed
+  const activeCue = subtitleFile
+    ? findActiveCue(subtitleEdit.entries, Math.round(currentTime * 1000))
+    : null
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <h2 className="text-xl font-semibold mb-4">Video Preview</h2>
-      
-      <div className="aspect-video bg-black rounded-lg overflow-hidden">
+
+      <div
+        ref={containerRef}
+        className="relative aspect-video bg-black rounded-lg overflow-hidden"
+      >
         {videoUrl ? (
           <video
             ref={videoRef}
-            className="w-full h-full"
+            className="w-full h-full object-contain"
             controls
             src={isProcessing ? undefined : videoUrl}
             style={{ filter: `brightness(${1 + brightness / 100})` }}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            onTimeUpdate={(e) => {
+              if (isScrubbing) return
+              const now = performance.now()
+              if (now - lastStoreWrite.current < 50) return
+              lastStoreWrite.current = now
+              setCurrentTime((e.target as HTMLVideoElement).currentTime)
+            }}
+            onSeeked={(e) => {
+              if (isScrubbing) return
+              setCurrentTime((e.target as HTMLVideoElement).currentTime)
+            }}
+            onLoadedMetadata={(e) => {
+              const el = e.target as HTMLVideoElement
+              void logger.log('[VideoPreview] Video metadata loaded')
+              if (el.videoWidth > 0 && el.videoHeight > 0) {
+                setVideoDimensions(el.videoWidth, el.videoHeight)
+              }
+            }}
             onError={async (e) => {
               const target = e.target as HTMLVideoElement
               const errorDetails = {
@@ -61,7 +158,6 @@ const VideoPreview: React.FC = () => {
               await logger.error('[VideoPreview] Video element error', errorDetails)
             }}
             onLoadStart={async () => await logger.log('[VideoPreview] Video load started')}
-            onLoadedMetadata={async () => await logger.log('[VideoPreview] Video metadata loaded')}
             onCanPlay={async () => await logger.log('[VideoPreview] Video can play')}
           >
             Your browser does not support the video tag.
@@ -74,11 +170,29 @@ const VideoPreview: React.FC = () => {
             </div>
           </div>
         )}
+
+        <CropOverlay
+          crop={cropSettings}
+          videoWidth={videoWidth}
+          videoHeight={videoHeight}
+          container={containerSize}
+          onChange={(next) => setCropSettings(next)}
+        />
+        <SubtitleOverlay
+          cue={activeCue}
+          bilingual={subtitleEdit.isBilingual}
+          secondaryPosition={subtitleEdit.secondaryLanguagePosition}
+          font={subtitleSettings.font}
+          fontSize={subtitleSettings.fontSize}
+          fontSizeAuto={subtitleSettings.fontSizeAuto}
+          anchor={subtitleAnchor}
+        />
       </div>
-      
+
       <div className="mt-4 flex justify-between items-center text-sm text-gray-500">
         <span>File: {videoFile.name}</span>
         <span>
+          {videoWidth > 0 && videoHeight > 0 ? `${videoWidth}×${videoHeight} · ` : ''}
           Duration: {Math.floor(videoFile.duration / 60)}:{Math.floor(videoFile.duration % 60).toString().padStart(2, '0')}
         </span>
       </div>

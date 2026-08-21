@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { VideoFile, SubtitleFile, TrimSettings, ProcessingProgress, AppMode, VideoSegment, CropSettings, SubtitleSettings, SubtitleEntry, SubtitleEditState, SecondaryLanguagePosition, QualitySettings, QualityMode } from '../types'
+import { clampTime } from '../utils/playback'
+import { evenFloor, fullFrameCrop } from '../utils/cropGeometry'
 
 const initialSubtitleEdit: SubtitleEditState = {
   entries: [],
@@ -28,6 +30,14 @@ interface VideoStore {
   subtitleEdit: SubtitleEditState
   isEditingSubtitles: boolean
   qualitySettings: QualitySettings
+  currentTime: number
+  isPlaying: boolean
+  isScrubbing: boolean
+  seekTarget: number | null
+  seekVersion: number
+  playbackIntent: 'toggle' | 'play' | 'pause' | null
+  playbackIntentVersion: number
+  segmentInPoint: number | null
 
   setVideoFile: (file: VideoFile | null) => void
   setSubtitleFile: (file: SubtitleFile | null) => void
@@ -68,6 +78,20 @@ interface VideoStore {
   setSecondaryLanguagePosition: (position: SecondaryLanguagePosition) => void
   clearSubtitleEdit: () => void
   setQualitySettings: (settings: Partial<QualitySettings>) => void
+  setCurrentTime: (time: number) => void
+  setIsPlaying: (playing: boolean) => void
+  setScrubbing: (scrubbing: boolean) => void
+  requestSeek: (time: number) => void
+  togglePlayback: () => void
+  setPlaybackIntent: (intent: 'play' | 'pause') => void
+  setVideoDimensions: (width: number, height: number) => void
+  markTrimIn: () => void
+  markTrimOut: () => void
+  markSegmentIn: () => void
+  markSegmentOut: () => void
+  addSegmentAtPlayhead: () => void
+  setCueStartFromPlayhead: (id: string) => void
+  setCueEndFromPlayhead: (id: string) => void
 }
 
 export const useVideoStore = create<VideoStore>((set) => ({
@@ -88,8 +112,31 @@ export const useVideoStore = create<VideoStore>((set) => ({
   isEditingSubtitles: false,
   // CRF 8 is near-transparent vs many sources (much larger files than 18).
   qualitySettings: { mode: 'copy' as QualityMode, crf: 8 },
+  currentTime: 0,
+  isPlaying: false,
+  isScrubbing: false,
+  seekTarget: null,
+  seekVersion: 0,
+  playbackIntent: null,
+  playbackIntentVersion: 0,
+  segmentInPoint: null,
 
-  setVideoFile: (file) => set({ videoFile: file }),
+  setVideoFile: (file) =>
+    set((state) => ({
+      videoFile: file,
+      currentTime: 0,
+      isPlaying: false,
+      isScrubbing: false,
+      seekTarget: 0,
+      seekVersion: state.seekVersion + 1,
+      playbackIntent: 'pause' as const,
+      playbackIntentVersion: state.playbackIntentVersion + 1,
+      segmentInPoint: null,
+      cropSettings:
+        file?.width && file.height
+          ? fullFrameCrop(file.width, file.height)
+          : { enabled: false, width: 1920, height: 1080, x: 0, y: 0 },
+    })),
   setSubtitleFile: (file) => set({ subtitleFile: file }),
   replaceSubtitleFile: (file, keepEditorOpen = false) =>
     set({
@@ -124,6 +171,14 @@ export const useVideoStore = create<VideoStore>((set) => ({
       subtitleEdit: { ...initialSubtitleEdit },
       isEditingSubtitles: false,
       qualitySettings: { mode: 'copy' as QualityMode, crf: 8 },
+      currentTime: 0,
+      isPlaying: false,
+      isScrubbing: false,
+      seekTarget: null,
+      seekVersion: 0,
+      playbackIntent: null,
+      playbackIntentVersion: 0,
+      segmentInPoint: null,
     }),
   setMode: (mode) => set({ mode }),
   addSegment: () => set((state) => {
@@ -241,4 +296,153 @@ export const useVideoStore = create<VideoStore>((set) => ({
   setQualitySettings: (settings) => set((state) => ({
     qualitySettings: { ...state.qualitySettings, ...settings },
   })),
+  setCurrentTime: (time) =>
+    set((state) => ({
+      currentTime: clampTime(time, state.videoFile?.duration ?? 0),
+    })),
+  setIsPlaying: (playing) => set({ isPlaying: playing }),
+  setScrubbing: (scrubbing) => set({ isScrubbing: scrubbing }),
+  requestSeek: (time) =>
+    set((state) => {
+      const t = clampTime(time, state.videoFile?.duration ?? 0)
+      return {
+        currentTime: t,
+        seekTarget: t,
+        seekVersion: state.seekVersion + 1,
+      }
+    }),
+  togglePlayback: () =>
+    set((state) => ({
+      playbackIntent: 'toggle' as const,
+      playbackIntentVersion: state.playbackIntentVersion + 1,
+    })),
+  setPlaybackIntent: (intent) =>
+    set((state) => ({
+      playbackIntent: intent,
+      playbackIntentVersion: state.playbackIntentVersion + 1,
+    })),
+  setVideoDimensions: (width, height) =>
+    set((state) => {
+      if (!state.videoFile || width <= 0 || height <= 0) return state
+      const frame = fullFrameCrop(width, height)
+      const crop = state.cropSettings
+      const cropSettings = crop.enabled
+        ? {
+            ...crop,
+            x: evenFloor(Math.min(crop.x, Math.max(0, frame.width - 2))),
+            y: evenFloor(Math.min(crop.y, Math.max(0, frame.height - 2))),
+            width: Math.max(2, evenFloor(Math.min(crop.width, frame.width))),
+            height: Math.max(2, evenFloor(Math.min(crop.height, frame.height))),
+          }
+        : frame
+      return {
+        videoFile: { ...state.videoFile, width, height },
+        cropSettings,
+      }
+    }),
+  markTrimIn: () =>
+    set((state) => {
+      if (!state.videoFile) return state
+      const t = clampTime(state.currentTime, state.videoFile.duration)
+      const endTime = state.trimSettings.endTime || state.videoFile.duration
+      return {
+        trimSettings: {
+          ...state.trimSettings,
+          startTime: Math.min(t, Math.max(0, endTime - 0.1)),
+          endTime,
+        },
+      }
+    }),
+  markTrimOut: () =>
+    set((state) => {
+      if (!state.videoFile) return state
+      const t = clampTime(state.currentTime, state.videoFile.duration)
+      const startTime = state.trimSettings.startTime
+      return {
+        trimSettings: {
+          ...state.trimSettings,
+          endTime: Math.max(t, startTime + 0.1),
+        },
+      }
+    }),
+  markSegmentIn: () =>
+    set((state) => {
+      if (!state.videoFile) return state
+      return {
+        segmentInPoint: clampTime(state.currentTime, state.videoFile.duration),
+      }
+    }),
+  markSegmentOut: () =>
+    set((state) => {
+      if (!state.videoFile) return state
+      const t = clampTime(state.currentTime, state.videoFile.duration)
+      const inPoint = state.segmentInPoint
+      if (inPoint == null) {
+        const startTime = t
+        const endTime = Math.min(startTime + 10, state.videoFile.duration)
+        if (endTime - startTime < 0.1) return state
+        return {
+          segments: [
+            ...state.segments,
+            { id: crypto.randomUUID(), startTime, endTime },
+          ],
+          segmentInPoint: null,
+        }
+      }
+      const startTime = Math.min(inPoint, t)
+      const endTime = Math.max(inPoint, t)
+      if (endTime - startTime < 0.1) {
+        return { segmentInPoint: null }
+      }
+      return {
+        segments: [
+          ...state.segments,
+          { id: crypto.randomUUID(), startTime, endTime },
+        ],
+        segmentInPoint: null,
+      }
+    }),
+  addSegmentAtPlayhead: () =>
+    set((state) => {
+      if (!state.videoFile) return state
+      const startTime = clampTime(state.currentTime, Math.max(0, state.videoFile.duration - 0.1))
+      const endTime = Math.min(startTime + 10, state.videoFile.duration)
+      if (endTime - startTime < 0.1) return state
+      return {
+        segments: [
+          ...state.segments,
+          { id: crypto.randomUUID(), startTime, endTime },
+        ],
+      }
+    }),
+  setCueStartFromPlayhead: (id) =>
+    set((state) => {
+      const tMs = Math.round(state.currentTime * 1000)
+      return {
+        subtitleEdit: {
+          ...state.subtitleEdit,
+          entries: state.subtitleEdit.entries.map((e) =>
+            e.id === id
+              ? { ...e, startTimeMs: Math.min(tMs, Math.max(0, e.endTimeMs - 1)) }
+              : e
+          ),
+          isDirty: true,
+        },
+      }
+    }),
+  setCueEndFromPlayhead: (id) =>
+    set((state) => {
+      const tMs = Math.round(state.currentTime * 1000)
+      return {
+        subtitleEdit: {
+          ...state.subtitleEdit,
+          entries: state.subtitleEdit.entries.map((e) =>
+            e.id === id
+              ? { ...e, endTimeMs: Math.max(tMs, e.startTimeMs + 1) }
+              : e
+          ),
+          isDirty: true,
+        },
+      }
+    }),
 }))

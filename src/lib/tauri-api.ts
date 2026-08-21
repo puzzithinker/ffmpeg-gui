@@ -90,6 +90,15 @@ export const tauriAPI = {
     return await invoke<number>('get_duration', { filePath });
   },
 
+  getMediaInfo: async (
+    filePath: string
+  ): Promise<{ duration: number; width: number; height: number }> => {
+    return await invoke<{ duration: number; width: number; height: number }>(
+      'get_media_info',
+      { filePath }
+    );
+  },
+
   getVideoUrl: async (filePath: string): Promise<string> => {
     return convertFileSrc(filePath);
   },

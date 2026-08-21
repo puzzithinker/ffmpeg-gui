@@ -2,21 +2,19 @@ import React from 'react'
 import { useVideoStore } from '../store/useVideoStore'
 import { tauriAPI } from '../lib/tauri-api'
 import { logger } from '../lib/logger'
+import { applySubtitlePath, applyVideoPath } from '../lib/media'
 
 const FileSelector: React.FC = () => {
-  const {
-    mode,
-    videoFile,
-    subtitleFile,
-    setVideoFile,
-    setSubtitleFile,
-    replaceSubtitleFile,
-    setError,
-    setTrimSettings,
-    isEditingSubtitles,
-    setIsEditingSubtitles,
-    clearSubtitleEdit,
-  } = useVideoStore()
+  const mode = useVideoStore((s) => s.mode)
+  const videoFile = useVideoStore((s) => s.videoFile)
+  const subtitleFile = useVideoStore((s) => s.subtitleFile)
+  const setVideoFile = useVideoStore((s) => s.setVideoFile)
+  const setSubtitleFile = useVideoStore((s) => s.setSubtitleFile)
+  const setError = useVideoStore((s) => s.setError)
+  const setTrimSettings = useVideoStore((s) => s.setTrimSettings)
+  const isEditingSubtitles = useVideoStore((s) => s.isEditingSubtitles)
+  const setIsEditingSubtitles = useVideoStore((s) => s.setIsEditingSubtitles)
+  const clearSubtitleEdit = useVideoStore((s) => s.clearSubtitleEdit)
 
   const handleVideoSelect = async () => {
     try {
@@ -25,20 +23,7 @@ const FileSelector: React.FC = () => {
       await logger.log(`[FileSelector] Selected file path: ${filePath}`)
 
       if (filePath) {
-        await logger.log('[FileSelector] Getting video duration...')
-        const duration = await tauriAPI.getVideoDuration(filePath)
-        await logger.log(`[FileSelector] Got duration: ${duration}`)
-
-        const fileName = filePath.split(/[/\\]/).pop() || 'Unknown'
-
-        setVideoFile({
-          path: filePath,
-          name: fileName,
-          duration
-        })
-
-        setTrimSettings({ startTime: 0, endTime: duration })
-        setError(null)
+        await applyVideoPath(filePath)
         await logger.log('[FileSelector] Video file loaded successfully')
       }
     } catch (error) {
@@ -51,13 +36,7 @@ const FileSelector: React.FC = () => {
     try {
       const filePath = await tauriAPI.selectSubtitleFile()
       if (filePath) {
-        const fileName = filePath.split(/[/\\]/).pop() || 'Unknown'
-        // Atomic replace: new path + empty editor so load effect cannot re-read the old file.
-        replaceSubtitleFile(
-          { path: filePath, name: fileName },
-          isEditingSubtitles
-        )
-        setError(null)
+        await applySubtitlePath(filePath, isEditingSubtitles)
       }
     } catch (error) {
       setError(`Failed to load subtitle: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -89,6 +68,7 @@ const FileSelector: React.FC = () => {
                 <p className="text-xs text-gray-500 break-all">{videoFile.path}</p>
                 <p className="text-sm text-gray-500">
                   Duration: {Math.floor(videoFile.duration / 60)}:{Math.floor(videoFile.duration % 60).toString().padStart(2, '0')}
+                  {videoFile.width && videoFile.height ? ` · ${videoFile.width}×${videoFile.height}` : ''}
                 </p>
               </div>
               <button
@@ -117,7 +97,7 @@ const FileSelector: React.FC = () => {
                 </button>
               </div>
               <p className="mt-2 text-xs text-gray-500">
-                Supports MP4, AVI, MOV, MKV, WebM, FLV
+                Drop a video here, or choose MP4, AVI, MOV, MKV, WebM, FLV
               </p>
             </div>
           )}
@@ -160,7 +140,7 @@ const FileSelector: React.FC = () => {
                 Select Subtitle File (Optional)
               </button>
               <p className="mt-2 text-xs text-gray-500">
-                Supports SRT, VTT, ASS, SSA
+                Drop an SRT here, or choose SRT, VTT, ASS, SSA
               </p>
             </div>
           )}

@@ -2,6 +2,8 @@ export interface VideoFile {
   path: string
   name: string
   duration: number
+  width?: number
+  height?: number
 }
 
 export interface SubtitleFile {

@@ -20,12 +20,24 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: mockListen,
 }));
 
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    onCloseRequested: vi.fn(async () => () => {}),
+    onDragDropEvent: vi.fn(async () => () => {}),
+    close: vi.fn(),
+  }),
+}));
+
 // Helper to setup common mocks
 export function setupTauriMocks() {
   mockInvoke.mockImplementation((cmd: string, _args?: any) => {
     switch (cmd) {
       case 'get_duration':
         return Promise.resolve(120.5);
+      case 'get_media_info':
+        return Promise.resolve({ duration: 120.5, width: 1920, height: 1080 });
+      case 'read_subtitle_file':
+        return Promise.resolve('1\n00:00:00,000 --> 00:00:01,000\nHello\n');
       case 'check_ffmpeg_availability':
         return Promise.resolve(true);
       case 'process_video':
